@@ -1,5 +1,3 @@
-buildozer.spec
-
 [app]
 title = MagPro
 package.name = MagPro
