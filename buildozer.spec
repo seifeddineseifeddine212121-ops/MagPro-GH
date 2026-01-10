@@ -1,3 +1,5 @@
+buildozer.spec
+
 [app]
 title = MagPro
 package.name = MagPro
@@ -5,7 +7,7 @@ package.domain = org.magpro
 source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,json,ttf
 version = 7.1.0
-requirements = python3,kivy,kivymd,requests,urllib3,pillow,arabic-reshaper,python-bidi==0.4.2,six,future,certifi,chardet,idna,pyzbar,libzbar,fpdf2,fonttools==4.38.0,defusedxml,openpyxl
+requirements = python3,kivy,kivymd,requests,urllib3,pillow,arabic-reshaper,python-bidi==0.4.2,six,future,certifi,chardet,idna,pyzbar,libzbar,fpdf2,fonttools==4.38.0,defusedxml,openpyxl,et_xmlfile,jdcal
 icon.filename = apk_icon.png
 orientation = portrait
 fullscreen = 0
