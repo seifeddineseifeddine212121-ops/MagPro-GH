@@ -2656,8 +2656,9 @@ class StockApp(MDApp):
         return final_image
 
     def print_ticket_bluetooth(self, transaction_data):
+        if not hasattr(self, 'print_lock'):
+            self.print_lock = threading.Lock()
         if not self.print_lock.acquire(blocking=False):
-            self.notify('الطباعة جارية... يرجى الانتظار', 'warning')
             return
         socket = None
         try:
@@ -2669,16 +2670,57 @@ class StockApp(MDApp):
                 return
             adapter = BluetoothAdapter.getDefaultAdapter()
             if not adapter or not adapter.isEnabled():
-                self.notify('Bluetooth OFF', 'error')
+                self.notify('Bluetooth éteint', 'error')
                 return
             device = adapter.getRemoteDevice(target_mac)
-            adapter.cancelDiscovery()
-            uuid = UUID.fromString('00001101-0000-1000-8000-00805F9B34FB')
+            if adapter.isDiscovering():
+                adapter.cancelDiscovery()
+            uuid_str = '00001101-0000-1000-8000-00805F9B34FB'
+            uuid = UUID.fromString(uuid_str)
+            connected = False
+            last_error = ''
             try:
                 socket = device.createInsecureRfcommSocketToServiceRecord(uuid)
-            except Exception:
-                socket = device.createRfcommSocketToServiceRecord(uuid)
-            socket.connect()
+                socket.connect()
+                connected = True
+            except Exception as e1:
+                last_error = str(e1)
+                if socket:
+                    try:
+                        socket.close()
+                    except:
+                        pass
+            if not connected:
+                try:
+                    time.sleep(0.5)
+                    socket = device.createRfcommSocketToServiceRecord(uuid)
+                    socket.connect()
+                    connected = True
+                except Exception as e2:
+                    last_error = str(e2)
+                    if socket:
+                        try:
+                            socket.close()
+                        except:
+                            pass
+            if not connected:
+                try:
+                    time.sleep(0.5)
+                    Method = device.getClass().getMethod('createRfcommSocket', [int])
+                    socket = Method.invoke(device, [1])
+                    socket.connect()
+                    connected = True
+                except Exception as e3:
+                    last_error = str(e3)
+                    if socket:
+                        try:
+                            socket.close()
+                        except:
+                            pass
+            if not connected:
+                self.notify('Échec de connexion imprimante', 'error')
+                print(f'Connection Failed: {last_error}')
+                return
             output_stream = socket.getOutputStream()
             img = self.create_receipt_image(transaction_data)
             if img.width != 576:
@@ -2690,7 +2732,7 @@ class StockApp(MDApp):
             INIT = ESC + b'@'
             ALIGN_CENTER = ESC + b'a' + b'\x01'
             output_stream.write(INIT)
-            time.sleep(0.1)
+            time.sleep(0.05)
             output_stream.write(ALIGN_CENTER)
             width, height = img.size
             slice_height = 100
@@ -2702,20 +2744,16 @@ class StockApp(MDApp):
                 raster_data = self.get_image_raster_data(slice_img)
                 output_stream.write(raster_data)
                 output_stream.flush()
-                time.sleep(0.05)
+                time.sleep(0.02)
                 y += h
             output_stream.write(b'\n\n\n')
             output_stream.write(GS + b'V\x00')
             output_stream.flush()
-            time.sleep(1.0)
+            time.sleep(0.5)
             socket.close()
         except Exception as e:
-            error_str = str(e)
-            print(f'Print Error: {error_str}')
-            if 'socket might closed' in error_str or 'Broken pipe' in error_str:
-                self.notify('Erreur connexion imprimante', 'error')
-            else:
-                self.notify(f'Erreur: {error_str[:20]}', 'error')
+            print(f'Critical Print Error: {e}')
+            self.notify("Erreur lors de l'impression", 'error')
             try:
                 if socket:
                     socket.close()
@@ -2931,17 +2969,25 @@ class StockApp(MDApp):
         Clock.schedule_once(self._deferred_start, 0.5)
 
     def request_android_permissions(self):
+        if platform != 'android':
+            return
         try:
             from android.permissions import request_permissions, Permission
             from jnius import autoclass
+            Build = autoclass('android.os.Build')
+            VERSION = autoclass('android.os.Build$VERSION')
+            sdk_int = VERSION.SDK_INT
+            permissions_list = [Permission.CAMERA, Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE, Permission.ACCESS_COARSE_LOCATION, Permission.ACCESS_FINE_LOCATION]
+            if sdk_int >= 31:
+                permissions_list.append('android.permission.BLUETOOTH_CONNECT')
+                permissions_list.append('android.permission.BLUETOOTH_SCAN')
+                permissions_list.append('android.permission.BLUETOOTH_ADVERTISE')
+            else:
+                permissions_list.append(Permission.BLUETOOTH)
+                permissions_list.append(Permission.BLUETOOTH_ADMIN)
 
             def callback(permissions, results):
                 pass
-            Build = autoclass('android.os.Build')
-            VERSION = autoclass('android.os.Build$VERSION')
-            permissions_list = [Permission.CAMERA, Permission.WRITE_EXTERNAL_STORAGE, Permission.READ_EXTERNAL_STORAGE, Permission.BLUETOOTH, Permission.BLUETOOTH_ADMIN, Permission.ACCESS_COARSE_LOCATION, Permission.ACCESS_FINE_LOCATION]
-            if VERSION.SDK_INT >= 31:
-                permissions_list.extend(['android.permission.BLUETOOTH_CONNECT', 'android.permission.BLUETOOTH_SCAN'])
             request_permissions(permissions_list, callback)
         except Exception as e:
             print(f'Permissions Error: {e}')
@@ -3304,7 +3350,7 @@ class StockApp(MDApp):
             stats_grid.add_widget(create_modern_stat_card('cash-minus', 'Décaissements', 'lbl_new_out', (1, 0.9, 0.9, 1), (0.8, 0, 0, 1)))
         if not self.is_seller_mode:
             stats_grid.add_widget(create_modern_stat_card('package-variant', 'Valeur Stock', 'lbl_new_stock_val', (1, 0.95, 0.8, 1), (0.8, 0.4, 0, 1)))
-            stats_grid.add_widget(create_modern_stat_card('chart-line', 'Bénéfice (Fåida)', 'lbl_new_profit', (0.95, 0.9, 1, 1), (0.5, 0, 0.5, 1)))
+            stats_grid.add_widget(create_modern_stat_card('chart-line', 'Bénéfice', 'lbl_new_profit', (0.95, 0.9, 1, 1), (0.5, 0, 0.5, 1)))
         self.stats_card_container.add_widget(stats_grid)
         self.check_and_load_stats()
 
