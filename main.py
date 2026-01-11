@@ -122,7 +122,6 @@ reshaper = arabic_reshaper.ArabicReshaper(configuration={'delete_harakat': True,
 # ==========================================
 KV_BUILDER = '\n<LeftButtonsContainer>:\n    adaptive_width: True\n    spacing: "4dp"\n    padding: "4dp"\n    pos_hint: {"center_y": .5}\n\n<RightButtonsContainer>:\n    adaptive_width: True\n    spacing: "8dp"\n    pos_hint: {"center_y": .5}\n\n<CustomHistoryItem>:\n    orientation: "horizontal"\n    size_hint_y: None\n    height: dp(80)\n    padding: dp(10)\n    spacing: dp(5)\n    radius: [10]\n    elevation: 1\n    ripple_behavior: True\n    md_bg_color: root.bg_color\n    on_release: root.on_tap_action()\n    \n    MDIcon:\n        icon: root.icon\n        theme_text_color: "Custom"\n        text_color: root.icon_color\n        pos_hint: {"center_y": .5}\n        font_size: "32sp"\n        size_hint_x: None\n        width: dp(40)\n        \n    MDBoxLayout:\n        orientation: "vertical"\n        pos_hint: {"center_y": .5}\n        spacing: dp(4)\n        size_hint_x: 0.5\n        \n        MDLabel:\n            text: root.text\n            bold: True\n            font_style: "Subtitle1"\n            font_size: "16sp"\n            theme_text_color: "Primary"\n            shorten: True\n            shorten_from: \'right\'\n            font_name: \'ArabicFont\'\n            markup: True\n            \n        MDLabel:\n            text: root.secondary_text\n            font_style: "Caption"\n            theme_text_color: "Secondary"\n            font_name: \'ArabicFont\'\n            \n    MDLabel:\n        text: root.right_text\n        halign: "right"\n        pos_hint: {"center_y": .5}\n        font_style: "Subtitle2"\n        bold: True\n        theme_text_color: "Custom"\n        text_color: root.icon_color\n        size_hint_x: 0.3\n        font_name: \'ArabicFont\'\n\n    MDIconButton:\n        icon: "pencil"\n        theme_text_color: "Custom"\n        text_color: (0, 0.5, 0.8, 1)\n        pos_hint: {"center_y": .5}\n        on_release: root.on_edit_action()\n\n<ProductRecycleItem>:\n    orientation: \'vertical\'\n    size_hint_y: None\n    height: dp(90)\n    padding: 0\n    spacing: 0\n    \n    MDCard:\n        orientation: \'horizontal\'\n        padding: dp(10)\n        spacing: dp(10)\n        radius: [8]\n        elevation: 1\n        ripple_behavior: True\n        on_release: root.on_tap()\n        md_bg_color: (1, 1, 1, 1)\n        \n        MDIcon:\n            icon: root.icon_name\n            theme_text_color: "Custom"\n            text_color: root.icon_color\n            size_hint_x: None\n            width: dp(40)\n            pos_hint: {\'center_y\': .5}\n            font_size: \'32sp\'\n\n        MDBoxLayout:\n            orientation: \'vertical\'\n            pos_hint: {\'center_y\': .5}\n            spacing: dp(5)\n            \n            MDLabel:\n                text: root.text_name\n                font_style: "Subtitle1"\n                bold: True\n                text_size: self.width, None\n                max_lines: 2\n                halign: \'left\'\n                font_size: \'17sp\'\n                theme_text_color: "Custom"\n                text_color: (0.1, 0.1, 0.1, 1)\n                font_name: \'ArabicFont\'\n            \n            MDBoxLayout:\n                orientation: \'horizontal\'\n                spacing: dp(10)\n                \n                MDLabel:\n                    text: root.text_price\n                    font_style: "H6"\n                    theme_text_color: "Custom"\n                    text_color: root.price_color\n                    bold: True\n                    size_hint_x: 0.6\n                    font_size: \'20sp\'\n                    font_name: \'ArabicFont\'\n                \n                MDLabel:\n                    text: root.text_stock\n                    theme_text_color: "Custom"\n                    text_color: (0.1, 0.1, 0.1, 1)\n                    halign: \'right\'\n                    size_hint_x: 0.4\n                    bold: True\n                    font_size: \'16sp\'\n                    font_name: \'ArabicFont\'\n\n<ProductRecycleView>:\n    viewclass: \'ProductRecycleItem\'\n    RecycleBoxLayout:\n        default_size: None, dp(95)\n        default_size_hint: 1, None\n        size_hint_y: None\n        height: self.minimum_height\n        orientation: \'vertical\'\n        spacing: dp(4)\n        padding: dp(5)\n\n<HistoryRecycleItem>:\n    orientation: "horizontal"\n    size_hint_y: None\n    height: dp(90)\n    padding: [dp(8), dp(5), dp(8), dp(5)]\n    spacing: dp(5)\n    radius: [10]\n    elevation: 1\n    ripple_behavior: True\n    md_bg_color: root.bg_color\n    on_release: root.on_tap()\n\n    MDIcon:\n        icon: root.icon_name\n        theme_text_color: "Custom"\n        text_color: root.icon_color\n        pos_hint: {"center_y": .5}\n        font_size: "30sp"\n        size_hint_x: None\n        width: dp(35)\n\n    MDBoxLayout:\n        orientation: "vertical"\n        pos_hint: {"center_y": .5}\n        # تم تغيير adaptive_height لضمان تمدد الصندوق حسب محتواه\n        adaptive_height: True\n        spacing: dp(3)\n        size_hint_x: 1\n\n        MDLabel:\n            text: root.text_primary\n            bold: True\n            font_style: "Subtitle1"\n            font_size: "15sp"\n            theme_text_color: "Primary"\n            # الخصائص التالية تمنع التداخل:\n            size_hint_y: None\n            adaptive_height: True \n            text_size: self.width, None\n            halign: \'left\'\n            shorten: False\n            max_lines: 2\n            font_name: \'ArabicFont\'\n            markup: True\n\n        MDLabel:\n            text: root.text_secondary\n            font_style: "Caption"\n            font_size: "12sp"\n            theme_text_color: "Secondary"\n            font_name: \'ArabicFont\'\n            # الخصائص التالية تمنع التداخل:\n            size_hint_y: None\n            adaptive_height: True\n            text_size: self.width, None\n            halign: \'left\'\n            shorten: True\n            shorten_from: \'right\'\n\n    MDLabel:\n        text: root.text_amount\n        halign: "right"\n        pos_hint: {"center_y": .5}\n        font_style: "Subtitle2"\n        bold: True\n        theme_text_color: "Custom"\n        text_color: root.icon_color\n        size_hint_x: None\n        adaptive_width: True\n        width: self.texture_size[0]\n        padding_x: dp(5)\n        font_name: \'ArabicFont\'\n\n<HistoryRecycleView>:\n    viewclass: \'HistoryRecycleItem\'\n    RecycleBoxLayout:\n        default_size: None, dp(95)\n        default_size_hint: 1, None\n        size_hint_y: None\n        height: self.minimum_height\n        orientation: \'vertical\'\n        spacing: dp(5)\n        padding: dp(5)\n\n<EntityRecycleItem>:\n    orientation: "horizontal"\n    size_hint_y: None\n    height: dp(80)\n    padding: dp(10)\n    spacing: dp(15)\n    ripple_behavior: True\n    md_bg_color: (1, 1, 1, 1)\n    radius: [0]\n    on_release: root.on_tap()\n\n    MDIcon:\n        icon: root.icon_name\n        theme_text_color: "Custom"\n        text_color: root.icon_color\n        pos_hint: {"center_y": .5}\n        font_size: "32sp"\n        size_hint_x: None\n        width: dp(40)\n\n    MDBoxLayout:\n        orientation: "vertical"\n        pos_hint: {"center_y": .5}\n        size_hint_x: 1\n        spacing: dp(4)\n\n        MDLabel:\n            text: root.text_name\n            bold: True\n            font_style: "Subtitle1"\n            font_name: \'ArabicFont\'\n            theme_text_color: "Custom"\n            text_color: (0.1, 0.1, 0.1, 1)\n            shorten: True\n            shorten_from: \'right\'\n            valign: \'center\'\n\n        MDLabel:\n            text: root.text_balance\n            font_style: "Caption"\n            font_name: \'ArabicFont\'\n            markup: True\n            theme_text_color: "Secondary"\n            valign: \'top\'\n\n<EntityRecycleView>:\n    viewclass: \'EntityRecycleItem\'\n    RecycleBoxLayout:\n        default_size: None, dp(80)\n        default_size_hint: 1, None\n        size_hint_y: None\n        height: self.minimum_height\n        orientation: \'vertical\'\n        spacing: dp(2)\n        padding: dp(0)\n\n<MgmtEntityRecycleItem>:\n    orientation: "horizontal"\n    size_hint_y: None\n    height: dp(80)\n    padding: dp(10)\n    spacing: dp(5)\n    ripple_behavior: True\n    md_bg_color: (1, 1, 1, 1)\n    on_release: root.on_pay()\n\n    MDIcon:\n        icon: "account-circle"\n        theme_text_color: "Custom"\n        text_color: (0.5, 0.5, 0.5, 1)\n        pos_hint: {"center_y": .5}\n        font_size: "32sp"\n        size_hint_x: None\n        width: dp(40)\n\n    MDBoxLayout:\n        orientation: "vertical"\n        pos_hint: {"center_y": .5}\n        size_hint_x: 1\n        spacing: dp(2)\n        padding: [dp(10), 0, 0, 0]\n\n        MDLabel:\n            text: root.text_name\n            bold: True\n            font_style: "Subtitle1"\n            font_name: \'ArabicFont\'\n            theme_text_color: "Custom"\n            text_color: (0.1, 0.1, 0.1, 1)\n            shorten: True\n            shorten_from: \'right\'\n            halign: "left"\n\n        MDLabel:\n            text: root.text_balance\n            font_style: "Caption"\n            font_name: \'ArabicFont\'\n            markup: True\n            theme_text_color: "Secondary"\n            halign: "left"\n\n    MDIconButton:\n        icon: "clock-time-eight-outline"\n        theme_text_color: "Custom"\n        text_color: (0, 0.5, 0.5, 1)\n        pos_hint: {"center_y": .5}\n        on_release: root.on_history()\n\n<MgmtEntityRecycleView>:\n    viewclass: \'MgmtEntityRecycleItem\'\n    RecycleBoxLayout:\n        default_size: None, dp(80)\n        default_size_hint: 1, None\n        size_hint_y: None\n        height: self.minimum_height\n        orientation: \'vertical\'\n        spacing: dp(2)\n        padding: dp(0)\n\n<CartRecycleItem>:\n    orientation: "horizontal"\n    size_hint_y: None\n    height: dp(85)\n    padding: [dp(15), 0, 0, 0]\n    md_bg_color: 1, 1, 1, 1\n    radius: [0]\n    ripple_behavior: True\n    on_release: root.on_tap()\n\n    MDBoxLayout:\n        orientation: "vertical"\n        pos_hint: {"center_y": .5}\n        adaptive_height: True\n        spacing: dp(4)\n\n        MDLabel:\n            text: root.text_name\n            font_style: "Subtitle1"\n            bold: True\n            theme_text_color: "Primary"\n            adaptive_height: True\n            font_name: \'ArabicFont\'\n\n        MDLabel:\n            text: root.text_details\n            font_size: "16sp"\n            theme_text_color: "Custom"\n            text_color: root.details_color\n            bold: True\n            adaptive_height: True\n            font_name: \'ArabicFont\'\n\n    MDIconButton:\n        icon: "delete"\n        theme_text_color: "Custom"\n        text_color: (0.9, 0, 0, 1)\n        pos_hint: {"center_y": .5}\n        icon_size: "24sp"\n        on_release: root.on_delete()\n\n<CartRecycleView>:\n    viewclass: \'CartRecycleItem\'\n    RecycleBoxLayout:\n        default_size: None, dp(85)\n        default_size_hint: 1, None\n        size_hint_y: None\n        height: self.minimum_height\n        orientation: \'vertical\'\n        spacing: dp(1)\n'
 # ==========================================
-
 class AppConstants:
     DEBUG = False
     DB_NAME = 'magpro_local.db'
@@ -522,12 +521,27 @@ class PDF(FPDF):
 class DatabaseManager:
 
     def __init__(self, db_name='magpro_local.db'):
-        self.db_name = db_name
+        if platform == 'android':
+            try:
+                from jnius import autoclass
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                files_dir = PythonActivity.mActivity.getFilesDir().getAbsolutePath()
+                self.db_name = os.path.join(files_dir, db_name)
+            except:
+                self.db_name = db_name
+        else:
+            self.db_name = db_name
         self.conn = None
         self.create_tables()
         self.seed_data()
 
     def get_connection(self):
+        db_dir = os.path.dirname(self.db_name)
+        if db_dir and (not os.path.exists(db_dir)):
+            try:
+                os.makedirs(db_dir)
+            except:
+                pass
         conn = sqlite3.connect(self.db_name)
         conn.row_factory = sqlite3.Row
         try:
@@ -1503,6 +1517,11 @@ class StockApp(MDApp):
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
             intent = Intent(Intent.ACTION_GET_CONTENT)
             intent.setType('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            try:
+                mimeTypes = ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel']
+                intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
+            except:
+                pass
             intent.addCategory(Intent.CATEGORY_OPENABLE)
             activity.bind(on_activity_result=self._on_android_file_chosen)
             currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
@@ -5697,6 +5716,11 @@ class StockApp(MDApp):
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
             intent = Intent(Intent.ACTION_GET_CONTENT)
             intent.setType('*/*')
+            try:
+                mimeTypes = ['application/vnd.sqlite3', 'application/x-sqlite3', 'application/octet-stream']
+                intent.putExtra(Intent.EXTRA_MIME_TYPES, mimeTypes)
+            except:
+                pass
             intent.addCategory(Intent.CATEGORY_OPENABLE)
             activity.bind(on_activity_result=self._on_restore_file_chosen)
             currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
@@ -5772,10 +5796,15 @@ class StockApp(MDApp):
                     self.final_restore_confirm.dismiss()
                 if self.db:
                     self.db.close()
-                app_dir = os.path.dirname(os.path.abspath(__file__))
-                current_db = os.path.join(app_dir, AppConstants.DB_NAME)
-                if not os.path.exists(current_db) and platform == 'android':
-                    current_db = os.path.join(self.user_data_dir, AppConstants.DB_NAME)
+                if platform == 'android':
+                    from jnius import autoclass
+                    PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                    files_dir = PythonActivity.mActivity.getFilesDir().getAbsolutePath()
+                    current_db = os.path.join(files_dir, AppConstants.DB_NAME)
+                else:
+                    app_dir = os.path.dirname(os.path.abspath(__file__))
+                    current_db = os.path.join(app_dir, AppConstants.DB_NAME)
+                # ====================================================
                 temp_backup = current_db + '.old_before_restore'
                 if os.path.exists(current_db):
                     try:
@@ -5821,24 +5850,38 @@ class StockApp(MDApp):
 
     def share_database_file(self):
         try:
+            try:
+                if self.db and self.db.conn:
+                    self.db.conn.execute('PRAGMA wal_checkpoint(TRUNCATE);')
+                    self.db.close()
+            except Exception as e:
+                print(f'Checkpoint error: {e}')
             backup_dir = self.get_backup_directory()
             if not os.path.exists(backup_dir):
                 os.makedirs(backup_dir)
             for fname in os.listdir(backup_dir):
                 if fname.startswith('Backup_Cloud_') and fname.endswith('.db'):
                     try:
-                        old_path = os.path.join(backup_dir, fname)
-                        os.remove(old_path)
-                    except Exception as e:
-                        print(f'Cleanup error: {e}')
+                        os.remove(os.path.join(backup_dir, fname))
+                    except:
+                        pass
             timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
             filename = f'Backup_Cloud_{timestamp}.db'
             file_path = os.path.join(backup_dir, filename)
-            app_dir = os.path.dirname(os.path.abspath(__file__))
-            db_source = os.path.join(app_dir, AppConstants.DB_NAME)
-            if not os.path.exists(db_source):
-                db_source = os.path.join(self.user_data_dir, AppConstants.DB_NAME)
+            if platform == 'android':
+                from jnius import autoclass
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                files_dir = PythonActivity.mActivity.getFilesDir().getAbsolutePath()
+                db_source = os.path.join(files_dir, AppConstants.DB_NAME)
+            else:
+                app_dir = os.path.dirname(os.path.abspath(__file__))
+                db_source = os.path.join(app_dir, AppConstants.DB_NAME)
             shutil.copy2(db_source, file_path)
+            try:
+                os.chmod(file_path, 511)
+            except:
+                pass
+            self.db.connect()
             if platform == 'android':
                 from jnius import autoclass, cast
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
@@ -5853,7 +5896,7 @@ class StockApp(MDApp):
                 uri = Uri.fromFile(db_file)
                 parcelable_uri = cast('android.os.Parcelable', uri)
                 shareIntent = Intent(Intent.ACTION_SEND)
-                shareIntent.setType('application/vnd.sqlite3')
+                shareIntent.setType('application/octet-stream')
                 shareIntent.putExtra(Intent.EXTRA_STREAM, parcelable_uri)
                 shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
@@ -5866,6 +5909,10 @@ class StockApp(MDApp):
         except Exception as e:
             print(f'Share Cloud Error: {e}')
             self.notify(f'Erreur: {e}', 'error')
+            try:
+                self.db.connect()
+            except:
+                pass
 
     def get_storage_path(self):
         if platform == 'android':
