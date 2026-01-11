@@ -1,29 +1,3 @@
-import arabic_reshaper
-import hashlib
-import json
-import logging
-import math
-import openpyxl
-import os
-import random
-import re
-import shutil
-import sqlite3
-import sys
-import textwrap
-import threading
-import time
-import traceback
-import zipfile
-# ==========================================
-DEBUG = True
-if DEBUG:
-    os.environ['KIVY_LOG_LEVEL'] = 'info'
-    os.environ['KIVY_NO_CONSOLELOG'] = '0'
-else:
-    os.environ['KIVY_LOG_LEVEL'] = 'error'
-    os.environ['KIVY_NO_CONSOLELOG'] = '1'
-# ==========================================
 from PIL import Image, ImageDraw, ImageFont
 from bidi.algorithm import get_display
 from datetime import datetime, timedelta
@@ -64,7 +38,32 @@ from kivymd.uix.snackbar import Snackbar
 from kivymd.uix.spinner import MDSpinner
 from kivymd.uix.textfield import MDTextField
 from kivymd.uix.toolbar import MDTopAppBar
-
+import arabic_reshaper
+import hashlib
+import json
+import logging
+import math
+import openpyxl
+import os
+import random
+import re
+import shutil
+import sqlite3
+import sys
+import textwrap
+import threading
+import time
+import traceback
+import zipfile
+# ==========================================
+DEBUG = True
+if DEBUG:
+    os.environ['KIVY_LOG_LEVEL'] = 'info'
+    os.environ['KIVY_NO_CONSOLELOG'] = '0'
+else:
+    os.environ['KIVY_LOG_LEVEL'] = 'error'
+    os.environ['KIVY_NO_CONSOLELOG'] = '1'
+# ==========================================
 # ==========================================
 if DEBUG:
     Config.set('kivy', 'log_level', 'info')
@@ -5655,6 +5654,11 @@ class StockApp(MDApp):
 
     def perform_local_backup(self, auto=False):
         try:
+            if self.db:
+                try:
+                    self.db.conn.execute('PRAGMA wal_checkpoint(TRUNCATE);')
+                except:
+                    pass
             if platform == 'android':
                 from jnius import autoclass
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
@@ -5674,11 +5678,6 @@ class StockApp(MDApp):
             else:
                 filename = f"MagPro_Backup_{datetime.now().strftime('%Y-%m-%d_%H-%M')}.db"
                 backup_path = self.get_android_documents_path(filename)
-            try:
-                if self.db and self.db.conn:
-                    self.db.conn.execute('PRAGMA wal_checkpoint(TRUNCATE);')
-            except:
-                pass
             shutil.copy2(db_source, backup_path)
             try:
                 os.chmod(backup_path, 511)
@@ -5800,7 +5799,7 @@ class StockApp(MDApp):
                     self.final_restore_confirm.dismiss()
                 if self.db:
                     self.db.close()
-                    self.db.conn = None
+                    time.sleep(0.2)
                 if platform == 'android':
                     from jnius import autoclass
                     PythonActivity = autoclass('org.kivy.android.PythonActivity')
@@ -5809,6 +5808,13 @@ class StockApp(MDApp):
                 else:
                     app_dir = os.path.dirname(os.path.abspath(__file__))
                     current_db = os.path.join(app_dir, AppConstants.DB_NAME)
+                try:
+                    if os.path.exists(current_db + '-wal'):
+                        os.remove(current_db + '-wal')
+                    if os.path.exists(current_db + '-shm'):
+                        os.remove(current_db + '-shm')
+                except:
+                    pass
                 if final_path.endswith('.zip'):
                     with zipfile.ZipFile(final_path, 'r') as zip_ref:
                         zip_ref.extract('magpro_local.db', os.path.dirname(current_db))
@@ -5842,12 +5848,12 @@ class StockApp(MDApp):
 
     def share_database_file(self):
         try:
-            try:
-                if self.db and self.db.conn:
+            if self.db:
+                try:
                     self.db.conn.execute('PRAGMA wal_checkpoint(TRUNCATE);')
-                    self.db.close()
-            except Exception as e:
-                print(f'Checkpoint error: {e}')
+                except:
+                    pass
+                self.db.close()
             timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
             zip_filename = f'Backup_{timestamp}.zip'
             if platform == 'android':
@@ -5861,6 +5867,10 @@ class StockApp(MDApp):
                 app_dir = os.path.dirname(os.path.abspath(__file__))
                 db_source = os.path.join(app_dir, AppConstants.DB_NAME)
                 zip_path = os.path.join(app_dir, zip_filename)
+            if not os.path.exists(db_source):
+                self.notify('Erreur: Base de données introuvable', 'error')
+                self.db.connect()
+                return
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 zipf.write(db_source, arcname='magpro_local.db')
             self.db.connect()
