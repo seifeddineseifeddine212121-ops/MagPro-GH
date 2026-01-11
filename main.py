@@ -1,28 +1,3 @@
-import arabic_reshaper
-import hashlib
-import json
-import logging
-import math
-import openpyxl
-import os
-import random
-import re
-import shutil
-import sqlite3
-import sys
-import textwrap
-import threading
-import time
-import traceback
-# ==========================================
-DEBUG = True
-if DEBUG:
-    os.environ['KIVY_LOG_LEVEL'] = 'info'
-    os.environ['KIVY_NO_CONSOLELOG'] = '0'
-else:
-    os.environ['KIVY_LOG_LEVEL'] = 'error'
-    os.environ['KIVY_NO_CONSOLELOG'] = '1'
-# ==========================================
 from PIL import Image, ImageDraw, ImageFont
 from bidi.algorithm import get_display
 from datetime import datetime, timedelta
@@ -63,6 +38,31 @@ from kivymd.uix.snackbar import Snackbar
 from kivymd.uix.spinner import MDSpinner
 from kivymd.uix.textfield import MDTextField
 from kivymd.uix.toolbar import MDTopAppBar
+import arabic_reshaper
+import hashlib
+import json
+import logging
+import math
+import openpyxl
+import os
+import random
+import re
+import shutil
+import sqlite3
+import sys
+import textwrap
+import threading
+import time
+import traceback
+# ==========================================
+DEBUG = True
+if DEBUG:
+    os.environ['KIVY_LOG_LEVEL'] = 'info'
+    os.environ['KIVY_NO_CONSOLELOG'] = '0'
+else:
+    os.environ['KIVY_LOG_LEVEL'] = 'error'
+    os.environ['KIVY_NO_CONSOLELOG'] = '1'
+# ==========================================
 # ==========================================
 if DEBUG:
     Config.set('kivy', 'log_level', 'info')
@@ -1524,50 +1524,11 @@ class StockApp(MDApp):
             self.notify('Sélection annulée', 'info')
 
     def _copy_uri_to_temp_and_process(self, uri):
-        try:
-            from jnius import autoclass, cast
-            PythonActivity = autoclass('org.kivy.android.PythonActivity')
-            Context = autoclass('android.content.Context')
-            currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
-            content_resolver = currentActivity.getContentResolver()
-            input_stream = content_resolver.openInputStream(uri)
-            temp_dir = self.user_data_dir
-            temp_file_path = os.path.join(temp_dir, 'temp_import.xlsx')
-            ByteArrayOutputStream = autoclass('java.io.ByteArrayOutputStream')
-            buffer_size = 4096
-            buffer = bytearray(buffer_size)
-            bytes_data = b''
-            import io
-            byte_array = bytearray()
-            while True:
-                available = input_stream.available()
-                if available <= 0:
-                    read_byte = input_stream.read()
-                    if read_byte == -1:
-                        break
-                    byte_array.append(read_byte)
-                else:
-                    chunk = input_stream.readNBytes(min(available, 1024 * 1024))
-                    pass
-            pass
-        except Exception:
-            pass
-        try:
-            from jnius import autoclass, cast
-            PythonActivity = autoclass('org.kivy.android.PythonActivity')
-            currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
-            content_resolver = currentActivity.getContentResolver()
-            input_stream = content_resolver.openInputStream(uri)
-            temp_file_path = os.path.join(self.user_data_dir, 'temp_import.xlsx')
-            with open(temp_file_path, 'wb') as f:
-                buffer = bytearray(8192)
-                while True:
-                    break
-            IOUtils = autoclass('org.apache.commons.io.IOUtils')
-            data_java = IOUtils.toByteArray(input_stream)
-            data_python = data_java.tostring()
-        except:
-            pass
+        self.notify('Importation en cours...', 'info')
+        threading.Thread(target=self._background_copy_task, args=(uri,), daemon=True).start()
+
+    def _background_copy_task(self, uri):
+        pfd = None
         try:
             from jnius import autoclass, cast
             PythonActivity = autoclass('org.kivy.android.PythonActivity')
@@ -1575,15 +1536,35 @@ class StockApp(MDApp):
             content_resolver = currentActivity.getContentResolver()
             pfd = content_resolver.openFileDescriptor(uri, 'r')
             fd = pfd.getFd()
-            file_reader = open(fd, 'rb')
             temp_file_path = os.path.join(self.user_data_dir, 'temp_import.xlsx')
             with open(temp_file_path, 'wb') as f_out:
-                shutil.copyfileobj(file_reader, f_out)
-            file_reader.close()
-            pfd.close()
-            Clock.schedule_once(lambda dt: self.pre_process_import([temp_file_path]))
+                while True:
+                    try:
+                        chunk = os.read(fd, 64 * 1024)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    f_out.write(chunk)
+            try:
+                pfd.close()
+            except:
+                pass
+            Clock.schedule_once(lambda dt: self._finish_import_process(temp_file_path), 0)
         except Exception as e:
-            self.notify(f'Erreur copie fichier: {e}', 'error')
+            print(f'COPY ERROR: {e}')
+            if pfd:
+                try:
+                    pfd.close()
+                except:
+                    pass
+            Clock.schedule_once(lambda dt: self.notify(f'Erreur copie: {str(e)}', 'error'), 0)
+
+    def _finish_import_process(self, file_path):
+        if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
+            self.pre_process_import([file_path])
+        else:
+            self.notify('Erreur: Fichier vide ou illisible', 'error')
 
     def render_transactions_list(self, transactions, target_rv, is_global_mode=False, reset=True):
         if not target_rv:
@@ -5782,20 +5763,21 @@ class StockApp(MDApp):
                 StrictMode.setVmPolicy(builder.build())
                 db_file = File(latest_file)
                 uri = Uri.fromFile(db_file)
+                parcelable_uri = cast('android.os.Parcelable', uri)
                 shareIntent = Intent(Intent.ACTION_SEND)
                 shareIntent.setType('application/octet-stream')
-                shareIntent.putExtra(Intent.EXTRA_STREAM, uri)
+                shareIntent.putExtra(Intent.EXTRA_STREAM, parcelable_uri)
                 shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
-                chooser = Intent.createChooser(shareIntent, 'Sauvegarder via (Drive, Telegram...)')
+                chooser = Intent.createChooser(shareIntent, 'Sauvegarder via...')
                 currentActivity.startActivity(chooser)
             else:
                 import subprocess
                 subprocess.Popen(f'explorer /select,"{latest_file}"')
                 self.notify('Fichier sélectionné. Glissez-le vers votre Cloud.', 'info')
         except Exception as e:
+            print(f'Share Error Detailed: {e}')
             self.notify(f'Erreur de partage : {e}', 'error')
-            print(f'Share Error: {e}')
 
     def get_storage_path(self):
         if platform == 'android':
