@@ -5587,10 +5587,16 @@ class StockApp(MDApp):
     def get_backup_directory(self):
         if platform == 'android':
             try:
-                from android.storage import primary_external_storage_path
-                base_dir = primary_external_storage_path()
-                backup_dir = os.path.join(base_dir, 'Download', 'MagPro_Backups')
-            except:
+                from jnius import autoclass
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                currentActivity = PythonActivity.mActivity
+                file_dir = currentActivity.getExternalFilesDir(None)
+                if file_dir:
+                    backup_dir = os.path.join(file_dir.getAbsolutePath(), 'MagPro_Backups')
+                else:
+                    backup_dir = os.path.join(self.user_data_dir, 'Backups')
+            except Exception as e:
+                print(f'Error getting android dir: {e}')
                 backup_dir = os.path.join(self.user_data_dir, 'Backups')
         else:
             home = os.path.expanduser('~')
@@ -5598,8 +5604,9 @@ class StockApp(MDApp):
         if not os.path.exists(backup_dir):
             try:
                 os.makedirs(backup_dir)
-            except:
-                backup_dir = self.user_data_dir
+            except OSError as e:
+                print(f'Error creating directory: {e}')
+                return self.user_data_dir
         return backup_dir
 
     def _rotate_backups(self, backup_dir, limit=30):
@@ -5743,7 +5750,7 @@ class StockApp(MDApp):
             self.perform_local_backup(auto=True)
             backup_dir = self.get_backup_directory()
             if not os.path.exists(backup_dir):
-                self.notify('Aucune sauvegarde trouvée', 'error')
+                self.notify('Dossier de sauvegarde introuvable', 'error')
                 return
             files = [os.path.join(backup_dir, f) for f in os.listdir(backup_dir) if f.endswith('.db')]
             if not files:
@@ -5756,6 +5763,7 @@ class StockApp(MDApp):
                 Intent = autoclass('android.content.Intent')
                 Uri = autoclass('android.net.Uri')
                 File = autoclass('java.io.File')
+                String = autoclass('java.lang.String')
                 StrictMode = autoclass('android.os.StrictMode')
                 VmPolicy = autoclass('android.os.StrictMode$VmPolicy')
                 Builder = autoclass('android.os.StrictMode$VmPolicy$Builder')
@@ -5765,19 +5773,20 @@ class StockApp(MDApp):
                 uri = Uri.fromFile(db_file)
                 parcelable_uri = cast('android.os.Parcelable', uri)
                 shareIntent = Intent(Intent.ACTION_SEND)
-                shareIntent.setType('application/octet-stream')
+                shareIntent.setType('application/vnd.sqlite3')
                 shareIntent.putExtra(Intent.EXTRA_STREAM, parcelable_uri)
                 shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
-                chooser = Intent.createChooser(shareIntent, 'Sauvegarder via...')
+                chooser_title = String('Sauvegarder via...')
+                chooser = Intent.createChooser(shareIntent, chooser_title)
                 currentActivity.startActivity(chooser)
             else:
                 import subprocess
                 subprocess.Popen(f'explorer /select,"{latest_file}"')
-                self.notify('Fichier sélectionné. Glissez-le vers votre Cloud.', 'info')
+                self.notify('Fichier prêt à être partagé.', 'info')
         except Exception as e:
-            print(f'Share Error Detailed: {e}')
-            self.notify(f'Erreur de partage : {e}', 'error')
+            print(f'Share Error: {e}')
+            self.notify(f'Erreur: {e}', 'error')
 
     def get_storage_path(self):
         if platform == 'android':
@@ -5867,9 +5876,12 @@ class StockApp(MDApp):
                 return
             excel_headers = [str(h).strip() for h in rows[0]]
             excel_data = rows[1:]
-            self.import_diag.dismiss()
+            if hasattr(self, 'import_diag') and self.import_diag:
+                self.import_diag.dismiss()
             self.open_mapping_dialog(excel_headers, excel_data)
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             self.notify(f'Erreur lecture: {e}', 'error')
 
     def open_mapping_dialog(self, excel_headers, excel_data):
