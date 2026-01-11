@@ -5678,7 +5678,8 @@ class StockApp(MDApp):
             else:
                 filename = f"MagPro_Backup_{datetime.now().strftime('%Y-%m-%d_%H-%M')}.db"
                 backup_path = self.get_android_documents_path(filename)
-            shutil.copy2(db_source, backup_path)
+            shutil.copyfile(db_source, backup_path)
+            # ===================
             try:
                 os.chmod(backup_path, 511)
             except:
@@ -5821,7 +5822,8 @@ class StockApp(MDApp):
                 else:
                     if os.path.exists(current_db):
                         os.remove(current_db)
-                    shutil.copy2(final_path, current_db)
+                    shutil.copyfile(final_path, current_db)
+                    # ============================
                 if 'temp_restore' in final_path:
                     try:
                         os.remove(final_path)
@@ -5848,32 +5850,54 @@ class StockApp(MDApp):
 
     def share_database_file(self):
         try:
-            if self.db:
-                try:
-                    self.db.conn.execute('PRAGMA wal_checkpoint(TRUNCATE);')
-                except:
-                    pass
-                self.db.close()
             timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
             zip_filename = f'Backup_{timestamp}.zip'
             if platform == 'android':
                 from jnius import autoclass, cast
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
                 cache_dir = PythonActivity.mActivity.getExternalCacheDir().getAbsolutePath()
-                files_dir = PythonActivity.mActivity.getFilesDir().getAbsolutePath()
-                db_source = os.path.join(files_dir, AppConstants.DB_NAME)
+                temp_db_copy = os.path.join(cache_dir, 'temp_backup.db')
                 zip_path = os.path.join(cache_dir, zip_filename)
             else:
                 app_dir = os.path.dirname(os.path.abspath(__file__))
-                db_source = os.path.join(app_dir, AppConstants.DB_NAME)
+                temp_db_copy = os.path.join(app_dir, 'temp_backup.db')
                 zip_path = os.path.join(app_dir, zip_filename)
-            if not os.path.exists(db_source):
-                self.notify('Erreur: Base de données introuvable', 'error')
+            if os.path.exists(temp_db_copy):
+                try:
+                    os.remove(temp_db_copy)
+                except:
+                    pass
+            if os.path.exists(zip_path):
+                try:
+                    os.remove(zip_path)
+                except:
+                    pass
+            try:
+                if self.db and self.db.conn:
+                    self.db.conn.execute(f"VACUUM INTO '{temp_db_copy}'")
+                else:
+                    self.db.connect()
+                    self.db.conn.execute(f"VACUUM INTO '{temp_db_copy}'")
+            except Exception as e:
+                print(f'Vacuum failed, fallback to copy: {e}')
+                self.db.close()
+                time.sleep(0.1)
+                if platform == 'android':
+                    files_dir = PythonActivity.mActivity.getFilesDir().getAbsolutePath()
+                    real_db = os.path.join(files_dir, AppConstants.DB_NAME)
+                else:
+                    real_db = os.path.join(app_dir, AppConstants.DB_NAME)
+                shutil.copyfile(real_db, temp_db_copy)
                 self.db.connect()
+            if not os.path.exists(temp_db_copy) or os.path.getsize(temp_db_copy) == 0:
+                self.notify('Erreur: La copie de sauvegarde est vide!', 'error')
                 return
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                zipf.write(db_source, arcname='magpro_local.db')
-            self.db.connect()
+                zipf.write(temp_db_copy, arcname='magpro_local.db')
+            try:
+                os.remove(temp_db_copy)
+            except:
+                pass
             if platform == 'android':
                 Intent = autoclass('android.content.Intent')
                 Uri = autoclass('android.net.Uri')
@@ -5897,12 +5921,9 @@ class StockApp(MDApp):
                 subprocess.Popen(f'explorer /select,"{zip_path}"')
                 self.notify(f'Zip créé: {zip_filename}', 'info')
         except Exception as e:
-            print(f'Share Cloud Error: {e}')
-            self.notify(f'Erreur: {e}', 'error')
-            try:
-                self.db.connect()
-            except:
-                pass
+            import traceback
+            traceback.print_exc()
+            self.notify(f'Erreur Cloud: {e}', 'error')
 
     def get_storage_path(self):
         if platform == 'android':
