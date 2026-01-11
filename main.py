@@ -2386,20 +2386,27 @@ class StockApp(MDApp):
         return lines
 
     def get_image_raster_data(self, image):
-        max_width = 576
-        if image.width != max_width:
-            ratio = max_width / float(image.width)
+        target_width = 576
+        if image.width != target_width:
+            ratio = target_width / float(image.width)
             new_height = int(image.height * ratio)
-            image = image.resize((max_width, new_height), Image.Resampling.LANCZOS)
+            image = image.resize((target_width, new_height), Image.Resampling.LANCZOS)
+            
         image = image.convert('1')
         width, height = image.size
-        xL = width // 8 % 256
-        xH = width // 8 // 256
+        
+        width_bytes = width // 8
+        xL = width_bytes % 256
+        xH = width_bytes // 256
         yL = height % 256
         yH = height // 256
+        
+        # الأمر GS v 0
         cmd = b'\x1dv0\x00' + bytes([xL, xH, yL, yH])
+        
         raw_bytes = image.tobytes()
         inverted_bytes = bytearray([b ^ 255 for b in raw_bytes])
+        
         return cmd + inverted_bytes
 
     def create_receipt_image(self, transaction_data):
@@ -2653,49 +2660,114 @@ class StockApp(MDApp):
         return final_image
 
     def print_ticket_bluetooth(self, transaction_data):
-        if platform != 'android':
+        # 1. منع التداخل: إذا كانت هناك طباعة جارية، لا تبدأ واحدة جديدة
+        if not self.print_lock.acquire(blocking=False):
+            self.notify("الطباعة جارية... يرجى الانتظار", "warning")
             return
-        target_mac = self.db.get_setting('printer_mac', '').strip()
-        if not target_mac:
-            self.notify('Imprimante non configurée', 'error')
-            return
+
         socket = None
         try:
+            if platform != 'android':
+                return
+            
+            target_mac = self.db.get_setting('printer_mac', '').strip()
+            if not target_mac:
+                self.notify('Imprimante non configurée', 'error')
+                return
+
+            # 2. إعداد البلوتوث
             adapter = BluetoothAdapter.getDefaultAdapter()
             if not adapter or not adapter.isEnabled():
                 self.notify('Bluetooth OFF', 'error')
                 return
+
             device = adapter.getRemoteDevice(target_mac)
-            uuid = UUID.fromString('00001101-0000-1000-8000-00805F9B34FB')
-            img = self.create_receipt_image(transaction_data)
-            raster_data = self.get_image_raster_data(img)
-            socket = device.createRfcommSocketToServiceRecord(uuid)
+            
+            # هام جداً: إيقاف البحث عن أجهزة لتسريع الاتصال ومنع التقطيع
+            adapter.cancelDiscovery()
+            
+            # استخدام UUID القياسي
+            uuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
+            
+            # 3. استخدام اتصال غير آمن (Insecure) - هذا يحل مشكلة read failed و socket closed
+            try:
+                socket = device.createInsecureRfcommSocketToServiceRecord(uuid)
+            except Exception:
+                # محاولة بديلة في حال فشل الأولى
+                socket = device.createRfcommSocketToServiceRecord(uuid)
+                
             socket.connect()
             output_stream = socket.getOutputStream()
+
+            # 4. تحضير الصورة
+            img = self.create_receipt_image(transaction_data)
+            
+            # التأكد من العرض 576 نقطة (80mm)
+            if img.width != 576:
+                ratio = 576 / float(img.width)
+                new_h = int(img.height * ratio)
+                img = img.resize((576, new_h), Image.Resampling.LANCZOS)
+
+            # أوامر تهيئة الطابعة
             ESC = b'\x1b'
             GS = b'\x1d'
             INIT = ESC + b'@'
-            CUT = GS + b'V\x00'
+            ALIGN_CENTER = ESC + b'a' + b'\x01'
+            
             output_stream.write(INIT)
             time.sleep(0.1)
-            chunk_size = 1024
-            for i in range(0, len(raster_data), chunk_size):
-                output_stream.write(raster_data[i:i + chunk_size])
-                output_stream.flush()
-                time.sleep(0.02)
+            output_stream.write(ALIGN_CENTER)
+
+            # 5. تقسيم الصورة وإرسالها (Slicing)
+            # نقسم الصورة لشرائح صغيرة (100 بكسل) لتجنب امتلاء الذاكرة
+            width, height = img.size
+            slice_height = 100 
+            y = 0
+            
+            while y < height:
+                h = min(slice_height, height - y)
+                box = (0, y, width, y + h)
+                slice_img = img.crop(box)
+                
+                # تحويل الشريحة إلى أوامر طباعة
+                raster_data = self.get_image_raster_data(slice_img)
+                
+                # إرسال البيانات
+                output_stream.write(raster_data)
+                output_stream.flush() # إجبار البيانات على الخروج
+                
+                # تأخير حيوي لمنع Broken Pipe
+                time.sleep(0.05) 
+                
+                y += h
+
+            # 6. أوامر القص والنهاية
             output_stream.write(b'\n\n\n')
-            output_stream.write(CUT)
+            output_stream.write(GS + b'V\x00') # أمر القص
             output_stream.flush()
-            time.sleep(0.1)
+            
+            # انتظار تنفيذ القص
+            time.sleep(1.0)
+            
             socket.close()
+            # self.notify("Impression terminée", "success")
+
         except Exception as e:
+            error_str = str(e)
+            print(f"Print Error: {error_str}")
+            if "socket might closed" in error_str or "Broken pipe" in error_str:
+                self.notify("Erreur connexion imprimante", "error")
+            else:
+                self.notify(f"Erreur: {error_str[:20]}", "error")
+            
             try:
                 if socket:
                     socket.close()
             except:
                 pass
-            print(f'Print Image Error: {e}')
-            self.notify("Erreur d'impression", 'error')
+        finally:
+            # 7. تحرير القفل للسماح بطباعة قادمة
+            self.print_lock.release()
 
     def _round_num(self, value):
         try:
