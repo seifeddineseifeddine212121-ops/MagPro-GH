@@ -1,29 +1,3 @@
-import arabic_reshaper
-import hashlib
-import json
-import logging
-import math
-import openpyxl
-import os
-import random
-import re
-import shutil
-import sqlite3
-import sys
-import textwrap
-import threading
-import time
-import traceback
-import zipfile
-# ==========================================
-DEBUG = True
-if DEBUG:
-    os.environ['KIVY_LOG_LEVEL'] = 'info'
-    os.environ['KIVY_NO_CONSOLELOG'] = '0'
-else:
-    os.environ['KIVY_LOG_LEVEL'] = 'error'
-    os.environ['KIVY_NO_CONSOLELOG'] = '1'
-# ==========================================
 from PIL import Image, ImageDraw, ImageFont
 from bidi.algorithm import get_display
 from datetime import datetime, timedelta
@@ -64,6 +38,32 @@ from kivymd.uix.snackbar import Snackbar
 from kivymd.uix.spinner import MDSpinner
 from kivymd.uix.textfield import MDTextField
 from kivymd.uix.toolbar import MDTopAppBar
+import arabic_reshaper
+import hashlib
+import json
+import logging
+import math
+import openpyxl
+import os
+import random
+import re
+import shutil
+import sqlite3
+import sys
+import textwrap
+import threading
+import time
+import traceback
+import zipfile
+# ==========================================
+DEBUG = True
+if DEBUG:
+    os.environ['KIVY_LOG_LEVEL'] = 'info'
+    os.environ['KIVY_NO_CONSOLELOG'] = '0'
+else:
+    os.environ['KIVY_LOG_LEVEL'] = 'error'
+    os.environ['KIVY_NO_CONSOLELOG'] = '1'
+# ==========================================
 # ==========================================
 if DEBUG:
     Config.set('kivy', 'log_level', 'info')
@@ -123,6 +123,7 @@ reshaper = arabic_reshaper.ArabicReshaper(configuration={'delete_harakat': True,
 # ==========================================
 KV_BUILDER = '\n<LeftButtonsContainer>:\n    adaptive_width: True\n    spacing: "4dp"\n    padding: "4dp"\n    pos_hint: {"center_y": .5}\n\n<RightButtonsContainer>:\n    adaptive_width: True\n    spacing: "8dp"\n    pos_hint: {"center_y": .5}\n\n<CustomHistoryItem>:\n    orientation: "horizontal"\n    size_hint_y: None\n    height: dp(80)\n    padding: dp(10)\n    spacing: dp(5)\n    radius: [10]\n    elevation: 1\n    ripple_behavior: True\n    md_bg_color: root.bg_color\n    on_release: root.on_tap_action()\n    \n    MDIcon:\n        icon: root.icon\n        theme_text_color: "Custom"\n        text_color: root.icon_color\n        pos_hint: {"center_y": .5}\n        font_size: "32sp"\n        size_hint_x: None\n        width: dp(40)\n        \n    MDBoxLayout:\n        orientation: "vertical"\n        pos_hint: {"center_y": .5}\n        spacing: dp(4)\n        size_hint_x: 0.5\n        \n        MDLabel:\n            text: root.text\n            bold: True\n            font_style: "Subtitle1"\n            font_size: "16sp"\n            theme_text_color: "Primary"\n            shorten: True\n            shorten_from: \'right\'\n            font_name: \'ArabicFont\'\n            markup: True\n            \n        MDLabel:\n            text: root.secondary_text\n            font_style: "Caption"\n            theme_text_color: "Secondary"\n            font_name: \'ArabicFont\'\n            \n    MDLabel:\n        text: root.right_text\n        halign: "right"\n        pos_hint: {"center_y": .5}\n        font_style: "Subtitle2"\n        bold: True\n        theme_text_color: "Custom"\n        text_color: root.icon_color\n        size_hint_x: 0.3\n        font_name: \'ArabicFont\'\n\n    MDIconButton:\n        icon: "pencil"\n        theme_text_color: "Custom"\n        text_color: (0, 0.5, 0.8, 1)\n        pos_hint: {"center_y": .5}\n        on_release: root.on_edit_action()\n\n<ProductRecycleItem>:\n    orientation: \'vertical\'\n    size_hint_y: None\n    height: dp(90)\n    padding: 0\n    spacing: 0\n    \n    MDCard:\n        orientation: \'horizontal\'\n        padding: dp(10)\n        spacing: dp(10)\n        radius: [8]\n        elevation: 1\n        ripple_behavior: True\n        on_release: root.on_tap()\n        md_bg_color: (1, 1, 1, 1)\n        \n        MDIcon:\n            icon: root.icon_name\n            theme_text_color: "Custom"\n            text_color: root.icon_color\n            size_hint_x: None\n            width: dp(40)\n            pos_hint: {\'center_y\': .5}\n            font_size: \'32sp\'\n\n        MDBoxLayout:\n            orientation: \'vertical\'\n            pos_hint: {\'center_y\': .5}\n            spacing: dp(5)\n            \n            MDLabel:\n                text: root.text_name\n                font_style: "Subtitle1"\n                bold: True\n                text_size: self.width, None\n                max_lines: 2\n                halign: \'left\'\n                font_size: \'17sp\'\n                theme_text_color: "Custom"\n                text_color: (0.1, 0.1, 0.1, 1)\n                font_name: \'ArabicFont\'\n            \n            MDBoxLayout:\n                orientation: \'horizontal\'\n                spacing: dp(10)\n                \n                MDLabel:\n                    text: root.text_price\n                    font_style: "H6"\n                    theme_text_color: "Custom"\n                    text_color: root.price_color\n                    bold: True\n                    size_hint_x: 0.6\n                    font_size: \'20sp\'\n                    font_name: \'ArabicFont\'\n                \n                MDLabel:\n                    text: root.text_stock\n                    theme_text_color: "Custom"\n                    text_color: (0.1, 0.1, 0.1, 1)\n                    halign: \'right\'\n                    size_hint_x: 0.4\n                    bold: True\n                    font_size: \'16sp\'\n                    font_name: \'ArabicFont\'\n\n<ProductRecycleView>:\n    viewclass: \'ProductRecycleItem\'\n    RecycleBoxLayout:\n        default_size: None, dp(95)\n        default_size_hint: 1, None\n        size_hint_y: None\n        height: self.minimum_height\n        orientation: \'vertical\'\n        spacing: dp(4)\n        padding: dp(5)\n\n<HistoryRecycleItem>:\n    orientation: "horizontal"\n    size_hint_y: None\n    height: dp(90)\n    padding: [dp(8), dp(5), dp(8), dp(5)]\n    spacing: dp(5)\n    radius: [10]\n    elevation: 1\n    ripple_behavior: True\n    md_bg_color: root.bg_color\n    on_release: root.on_tap()\n\n    MDIcon:\n        icon: root.icon_name\n        theme_text_color: "Custom"\n        text_color: root.icon_color\n        pos_hint: {"center_y": .5}\n        font_size: "30sp"\n        size_hint_x: None\n        width: dp(35)\n\n    MDBoxLayout:\n        orientation: "vertical"\n        pos_hint: {"center_y": .5}\n        # تم تغيير adaptive_height لضمان تمدد الصندوق حسب محتواه\n        adaptive_height: True\n        spacing: dp(3)\n        size_hint_x: 1\n\n        MDLabel:\n            text: root.text_primary\n            bold: True\n            font_style: "Subtitle1"\n            font_size: "15sp"\n            theme_text_color: "Primary"\n            # الخصائص التالية تمنع التداخل:\n            size_hint_y: None\n            adaptive_height: True \n            text_size: self.width, None\n            halign: \'left\'\n            shorten: False\n            max_lines: 2\n            font_name: \'ArabicFont\'\n            markup: True\n\n        MDLabel:\n            text: root.text_secondary\n            font_style: "Caption"\n            font_size: "12sp"\n            theme_text_color: "Secondary"\n            font_name: \'ArabicFont\'\n            # الخصائص التالية تمنع التداخل:\n            size_hint_y: None\n            adaptive_height: True\n            text_size: self.width, None\n            halign: \'left\'\n            shorten: True\n            shorten_from: \'right\'\n\n    MDLabel:\n        text: root.text_amount\n        halign: "right"\n        pos_hint: {"center_y": .5}\n        font_style: "Subtitle2"\n        bold: True\n        theme_text_color: "Custom"\n        text_color: root.icon_color\n        size_hint_x: None\n        adaptive_width: True\n        width: self.texture_size[0]\n        padding_x: dp(5)\n        font_name: \'ArabicFont\'\n\n<HistoryRecycleView>:\n    viewclass: \'HistoryRecycleItem\'\n    RecycleBoxLayout:\n        default_size: None, dp(95)\n        default_size_hint: 1, None\n        size_hint_y: None\n        height: self.minimum_height\n        orientation: \'vertical\'\n        spacing: dp(5)\n        padding: dp(5)\n\n<EntityRecycleItem>:\n    orientation: "horizontal"\n    size_hint_y: None\n    height: dp(80)\n    padding: dp(10)\n    spacing: dp(15)\n    ripple_behavior: True\n    md_bg_color: (1, 1, 1, 1)\n    radius: [0]\n    on_release: root.on_tap()\n\n    MDIcon:\n        icon: root.icon_name\n        theme_text_color: "Custom"\n        text_color: root.icon_color\n        pos_hint: {"center_y": .5}\n        font_size: "32sp"\n        size_hint_x: None\n        width: dp(40)\n\n    MDBoxLayout:\n        orientation: "vertical"\n        pos_hint: {"center_y": .5}\n        size_hint_x: 1\n        spacing: dp(4)\n\n        MDLabel:\n            text: root.text_name\n            bold: True\n            font_style: "Subtitle1"\n            font_name: \'ArabicFont\'\n            theme_text_color: "Custom"\n            text_color: (0.1, 0.1, 0.1, 1)\n            shorten: True\n            shorten_from: \'right\'\n            valign: \'center\'\n\n        MDLabel:\n            text: root.text_balance\n            font_style: "Caption"\n            font_name: \'ArabicFont\'\n            markup: True\n            theme_text_color: "Secondary"\n            valign: \'top\'\n\n<EntityRecycleView>:\n    viewclass: \'EntityRecycleItem\'\n    RecycleBoxLayout:\n        default_size: None, dp(80)\n        default_size_hint: 1, None\n        size_hint_y: None\n        height: self.minimum_height\n        orientation: \'vertical\'\n        spacing: dp(2)\n        padding: dp(0)\n\n<MgmtEntityRecycleItem>:\n    orientation: "horizontal"\n    size_hint_y: None\n    height: dp(80)\n    padding: dp(10)\n    spacing: dp(5)\n    ripple_behavior: True\n    md_bg_color: (1, 1, 1, 1)\n    on_release: root.on_pay()\n\n    MDIcon:\n        icon: "account-circle"\n        theme_text_color: "Custom"\n        text_color: (0.5, 0.5, 0.5, 1)\n        pos_hint: {"center_y": .5}\n        font_size: "32sp"\n        size_hint_x: None\n        width: dp(40)\n\n    MDBoxLayout:\n        orientation: "vertical"\n        pos_hint: {"center_y": .5}\n        size_hint_x: 1\n        spacing: dp(2)\n        padding: [dp(10), 0, 0, 0]\n\n        MDLabel:\n            text: root.text_name\n            bold: True\n            font_style: "Subtitle1"\n            font_name: \'ArabicFont\'\n            theme_text_color: "Custom"\n            text_color: (0.1, 0.1, 0.1, 1)\n            shorten: True\n            shorten_from: \'right\'\n            halign: "left"\n\n        MDLabel:\n            text: root.text_balance\n            font_style: "Caption"\n            font_name: \'ArabicFont\'\n            markup: True\n            theme_text_color: "Secondary"\n            halign: "left"\n\n    MDIconButton:\n        icon: "clock-time-eight-outline"\n        theme_text_color: "Custom"\n        text_color: (0, 0.5, 0.5, 1)\n        pos_hint: {"center_y": .5}\n        on_release: root.on_history()\n\n<MgmtEntityRecycleView>:\n    viewclass: \'MgmtEntityRecycleItem\'\n    RecycleBoxLayout:\n        default_size: None, dp(80)\n        default_size_hint: 1, None\n        size_hint_y: None\n        height: self.minimum_height\n        orientation: \'vertical\'\n        spacing: dp(2)\n        padding: dp(0)\n\n<CartRecycleItem>:\n    orientation: "horizontal"\n    size_hint_y: None\n    height: dp(85)\n    padding: [dp(15), 0, 0, 0]\n    md_bg_color: 1, 1, 1, 1\n    radius: [0]\n    ripple_behavior: True\n    on_release: root.on_tap()\n\n    MDBoxLayout:\n        orientation: "vertical"\n        pos_hint: {"center_y": .5}\n        adaptive_height: True\n        spacing: dp(4)\n\n        MDLabel:\n            text: root.text_name\n            font_style: "Subtitle1"\n            bold: True\n            theme_text_color: "Primary"\n            adaptive_height: True\n            font_name: \'ArabicFont\'\n\n        MDLabel:\n            text: root.text_details\n            font_size: "16sp"\n            theme_text_color: "Custom"\n            text_color: root.details_color\n            bold: True\n            adaptive_height: True\n            font_name: \'ArabicFont\'\n\n    MDIconButton:\n        icon: "delete"\n        theme_text_color: "Custom"\n        text_color: (0.9, 0, 0, 1)\n        pos_hint: {"center_y": .5}\n        icon_size: "24sp"\n        on_release: root.on_delete()\n\n<CartRecycleView>:\n    viewclass: \'CartRecycleItem\'\n    RecycleBoxLayout:\n        default_size: None, dp(85)\n        default_size_hint: 1, None\n        size_hint_y: None\n        height: self.minimum_height\n        orientation: \'vertical\'\n        spacing: dp(1)\n'
 # ==========================================
+
 class AppConstants:
     DEBUG = False
     DB_NAME = 'magpro_local.db'
@@ -1527,6 +1528,7 @@ class StockApp(MDApp):
     entity_page_offset = 0
     is_loading_entities = False
     active_entity_rv = None
+    print_lock = threading.Lock()
 
     def fix_text(self, text):
         if not text or not isinstance(text, str):
@@ -2391,22 +2393,16 @@ class StockApp(MDApp):
             ratio = target_width / float(image.width)
             new_height = int(image.height * ratio)
             image = image.resize((target_width, new_height), Image.Resampling.LANCZOS)
-            
         image = image.convert('1')
         width, height = image.size
-        
         width_bytes = width // 8
         xL = width_bytes % 256
         xH = width_bytes // 256
         yL = height % 256
         yH = height // 256
-        
-        # الأمر GS v 0
         cmd = b'\x1dv0\x00' + bytes([xL, xH, yL, yH])
-        
         raw_bytes = image.tobytes()
         inverted_bytes = bytearray([b ^ 255 for b in raw_bytes])
-        
         return cmd + inverted_bytes
 
     def create_receipt_image(self, transaction_data):
@@ -2660,113 +2656,72 @@ class StockApp(MDApp):
         return final_image
 
     def print_ticket_bluetooth(self, transaction_data):
-        # 1. منع التداخل: إذا كانت هناك طباعة جارية، لا تبدأ واحدة جديدة
         if not self.print_lock.acquire(blocking=False):
-            self.notify("الطباعة جارية... يرجى الانتظار", "warning")
+            self.notify('الطباعة جارية... يرجى الانتظار', 'warning')
             return
-
         socket = None
         try:
             if platform != 'android':
                 return
-            
             target_mac = self.db.get_setting('printer_mac', '').strip()
             if not target_mac:
                 self.notify('Imprimante non configurée', 'error')
                 return
-
-            # 2. إعداد البلوتوث
             adapter = BluetoothAdapter.getDefaultAdapter()
             if not adapter or not adapter.isEnabled():
                 self.notify('Bluetooth OFF', 'error')
                 return
-
             device = adapter.getRemoteDevice(target_mac)
-            
-            # هام جداً: إيقاف البحث عن أجهزة لتسريع الاتصال ومنع التقطيع
             adapter.cancelDiscovery()
-            
-            # استخدام UUID القياسي
-            uuid = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
-            
-            # 3. استخدام اتصال غير آمن (Insecure) - هذا يحل مشكلة read failed و socket closed
+            uuid = UUID.fromString('00001101-0000-1000-8000-00805F9B34FB')
             try:
                 socket = device.createInsecureRfcommSocketToServiceRecord(uuid)
             except Exception:
-                # محاولة بديلة في حال فشل الأولى
                 socket = device.createRfcommSocketToServiceRecord(uuid)
-                
             socket.connect()
             output_stream = socket.getOutputStream()
-
-            # 4. تحضير الصورة
             img = self.create_receipt_image(transaction_data)
-            
-            # التأكد من العرض 576 نقطة (80mm)
             if img.width != 576:
                 ratio = 576 / float(img.width)
                 new_h = int(img.height * ratio)
                 img = img.resize((576, new_h), Image.Resampling.LANCZOS)
-
-            # أوامر تهيئة الطابعة
             ESC = b'\x1b'
             GS = b'\x1d'
             INIT = ESC + b'@'
             ALIGN_CENTER = ESC + b'a' + b'\x01'
-            
             output_stream.write(INIT)
             time.sleep(0.1)
             output_stream.write(ALIGN_CENTER)
-
-            # 5. تقسيم الصورة وإرسالها (Slicing)
-            # نقسم الصورة لشرائح صغيرة (100 بكسل) لتجنب امتلاء الذاكرة
             width, height = img.size
-            slice_height = 100 
+            slice_height = 100
             y = 0
-            
             while y < height:
                 h = min(slice_height, height - y)
                 box = (0, y, width, y + h)
                 slice_img = img.crop(box)
-                
-                # تحويل الشريحة إلى أوامر طباعة
                 raster_data = self.get_image_raster_data(slice_img)
-                
-                # إرسال البيانات
                 output_stream.write(raster_data)
-                output_stream.flush() # إجبار البيانات على الخروج
-                
-                # تأخير حيوي لمنع Broken Pipe
-                time.sleep(0.05) 
-                
+                output_stream.flush()
+                time.sleep(0.05)
                 y += h
-
-            # 6. أوامر القص والنهاية
             output_stream.write(b'\n\n\n')
-            output_stream.write(GS + b'V\x00') # أمر القص
+            output_stream.write(GS + b'V\x00')
             output_stream.flush()
-            
-            # انتظار تنفيذ القص
             time.sleep(1.0)
-            
             socket.close()
-            # self.notify("Impression terminée", "success")
-
         except Exception as e:
             error_str = str(e)
-            print(f"Print Error: {error_str}")
-            if "socket might closed" in error_str or "Broken pipe" in error_str:
-                self.notify("Erreur connexion imprimante", "error")
+            print(f'Print Error: {error_str}')
+            if 'socket might closed' in error_str or 'Broken pipe' in error_str:
+                self.notify('Erreur connexion imprimante', 'error')
             else:
-                self.notify(f"Erreur: {error_str[:20]}", "error")
-            
+                self.notify(f'Erreur: {error_str[:20]}', 'error')
             try:
                 if socket:
                     socket.close()
             except:
                 pass
         finally:
-            # 7. تحرير القفل للسماح بطباعة قادمة
             self.print_lock.release()
 
     def _round_num(self, value):
