@@ -1495,6 +1495,96 @@ class StockApp(MDApp):
                 return text
         return text
 
+    def open_android_native_picker(self):
+        try:
+            from jnius import autoclass, cast
+            from android import activity
+            Intent = autoclass('android.content.Intent')
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            intent = Intent(Intent.ACTION_GET_CONTENT)
+            intent.setType('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            activity.bind(on_activity_result=self._on_android_file_chosen)
+            currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
+            currentActivity.startActivityForResult(intent, 101)
+        except Exception as e:
+            self.notify(f'Erreur lancement sélecteur: {e}', 'error')
+
+    def _on_android_file_chosen(self, requestCode, resultCode, intent):
+        from android import activity
+        activity.unbind(on_activity_result=self._on_android_file_chosen)
+        if requestCode == 101 and resultCode == -1:
+            if intent:
+                uri = intent.getData()
+                if uri:
+                    self._copy_uri_to_temp_and_process(uri)
+                else:
+                    self.notify('Aucun fichier sélectionné', 'error')
+        else:
+            self.notify('Sélection annulée', 'info')
+
+    def _copy_uri_to_temp_and_process(self, uri):
+        try:
+            from jnius import autoclass, cast
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            Context = autoclass('android.content.Context')
+            currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
+            content_resolver = currentActivity.getContentResolver()
+            input_stream = content_resolver.openInputStream(uri)
+            temp_dir = self.user_data_dir
+            temp_file_path = os.path.join(temp_dir, 'temp_import.xlsx')
+            ByteArrayOutputStream = autoclass('java.io.ByteArrayOutputStream')
+            buffer_size = 4096
+            buffer = bytearray(buffer_size)
+            bytes_data = b''
+            import io
+            byte_array = bytearray()
+            while True:
+                available = input_stream.available()
+                if available <= 0:
+                    read_byte = input_stream.read()
+                    if read_byte == -1:
+                        break
+                    byte_array.append(read_byte)
+                else:
+                    chunk = input_stream.readNBytes(min(available, 1024 * 1024))
+                    pass
+            pass
+        except Exception:
+            pass
+        try:
+            from jnius import autoclass, cast
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
+            content_resolver = currentActivity.getContentResolver()
+            input_stream = content_resolver.openInputStream(uri)
+            temp_file_path = os.path.join(self.user_data_dir, 'temp_import.xlsx')
+            with open(temp_file_path, 'wb') as f:
+                buffer = bytearray(8192)
+                while True:
+                    break
+            IOUtils = autoclass('org.apache.commons.io.IOUtils')
+            data_java = IOUtils.toByteArray(input_stream)
+            data_python = data_java.tostring()
+        except:
+            pass
+        try:
+            from jnius import autoclass, cast
+            PythonActivity = autoclass('org.kivy.android.PythonActivity')
+            currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
+            content_resolver = currentActivity.getContentResolver()
+            pfd = content_resolver.openFileDescriptor(uri, 'r')
+            fd = pfd.getFd()
+            file_reader = open(fd, 'rb')
+            temp_file_path = os.path.join(self.user_data_dir, 'temp_import.xlsx')
+            with open(temp_file_path, 'wb') as f_out:
+                shutil.copyfileobj(file_reader, f_out)
+            file_reader.close()
+            pfd.close()
+            Clock.schedule_once(lambda dt: self.pre_process_import([temp_file_path]))
+        except Exception as e:
+            self.notify(f'Erreur copie fichier: {e}', 'error')
+
     def render_transactions_list(self, transactions, target_rv, is_global_mode=False, reset=True):
         if not target_rv:
             return
@@ -5686,7 +5776,9 @@ class StockApp(MDApp):
                 Uri = autoclass('android.net.Uri')
                 File = autoclass('java.io.File')
                 StrictMode = autoclass('android.os.StrictMode')
-                builder = StrictMode.VmPolicy.Builder()
+                VmPolicy = autoclass('android.os.StrictMode$VmPolicy')
+                Builder = autoclass('android.os.StrictMode$VmPolicy$Builder')
+                builder = Builder()
                 StrictMode.setVmPolicy(builder.build())
                 db_file = File(latest_file)
                 uri = Uri.fromFile(db_file)
@@ -5749,26 +5841,29 @@ class StockApp(MDApp):
             conn.close()
 
     def import_data_dialog(self):
-        default_path = self.get_storage_path()
-        if not os.path.exists(default_path):
-            try:
-                os.makedirs(default_path)
-            except:
-                default_path = self.user_data_dir
-        content = MDBoxLayout(orientation='vertical', spacing=10, size_hint_y=None, height=dp(500))
-        content.add_widget(MDLabel(text='Sélectionnez un fichier Excel (.xlsx)', font_style='Caption', theme_text_color='Secondary', size_hint_y=None, height=dp(20)))
-        list_bg = MDCard(orientation='vertical', size_hint_y=1, md_bg_color=(0.15, 0.15, 0.15, 1), radius=[10], padding='5dp', elevation=0)
-        self.import_file_chooser = FileChooserListView(path=default_path, filters=['*.xlsx'], size_hint_y=1)
-        list_bg.add_widget(self.import_file_chooser)
-        content.add_widget(list_bg)
-        btn_box = MDBoxLayout(spacing=10, size_hint_y=None, height=dp(50))
-        btn_cancel = MDFlatButton(text='ANNULER', theme_text_color='Custom', text_color=self.theme_cls.primary_color, on_release=lambda x: self.import_diag.dismiss())
-        btn_import = MDRaisedButton(text='SUIVANT', md_bg_color=(0.1, 0.4, 0.8, 1), text_color=(1, 1, 1, 1), on_release=lambda x: self.pre_process_import(self.import_file_chooser.selection))
-        btn_box.add_widget(btn_cancel)
-        btn_box.add_widget(btn_import)
-        content.add_widget(btn_box)
-        self.import_diag = MDDialog(title='Importer Produits (1/2)', type='custom', content_cls=content, size_hint=(0.95, 0.9))
-        self.import_diag.open()
+        if platform == 'android':
+            self.open_android_native_picker()
+        else:
+            default_path = self.get_storage_path()
+            if not os.path.exists(default_path):
+                try:
+                    os.makedirs(default_path)
+                except:
+                    default_path = self.user_data_dir
+            content = MDBoxLayout(orientation='vertical', spacing=10, size_hint_y=None, height=dp(500))
+            content.add_widget(MDLabel(text='Sélectionnez un fichier Excel (.xlsx)', font_style='Caption', theme_text_color='Secondary', size_hint_y=None, height=dp(20)))
+            list_bg = MDCard(orientation='vertical', size_hint_y=1, md_bg_color=(0.15, 0.15, 0.15, 1), radius=[10], padding='5dp', elevation=0)
+            self.import_file_chooser = FileChooserListView(path=default_path, filters=['*.xlsx'], size_hint_y=1)
+            list_bg.add_widget(self.import_file_chooser)
+            content.add_widget(list_bg)
+            btn_box = MDBoxLayout(spacing=10, size_hint_y=None, height=dp(50))
+            btn_cancel = MDFlatButton(text='ANNULER', theme_text_color='Custom', text_color=self.theme_cls.primary_color, on_release=lambda x: self.import_diag.dismiss())
+            btn_import = MDRaisedButton(text='SUIVANT', md_bg_color=(0.1, 0.4, 0.8, 1), text_color=(1, 1, 1, 1), on_release=lambda x: self.pre_process_import(self.import_file_chooser.selection))
+            btn_box.add_widget(btn_cancel)
+            btn_box.add_widget(btn_import)
+            content.add_widget(btn_box)
+            self.import_diag = MDDialog(title='Importer Produits (PC)', type='custom', content_cls=content, size_hint=(0.95, 0.9))
+            self.import_diag.open()
 
     def pre_process_import(self, selection):
         if not selection:
