@@ -7035,31 +7035,9 @@ class StockApp(MDApp):
 
     def share_database_file(self):
         try:
-            target_dir = ''
-            if platform == 'android':
-                from jnius import autoclass, cast
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
-                context = currentActivity.getApplicationContext()
-                cache_dir_obj = context.getExternalCacheDir()
-                if not cache_dir_obj:
-                    cache_dir_obj = context.getCacheDir()
-                target_dir = cache_dir_obj.getAbsolutePath()
-            else:
-                target_dir = self.user_data_dir
-            try:
-                if os.path.exists(target_dir):
-                    for filename in os.listdir(target_dir):
-                        if filename.startswith('MagPro_Cloud_Full_') and filename.endswith('.zip'):
-                            try:
-                                os.remove(os.path.join(target_dir, filename))
-                            except:
-                                pass
-            except:
-                pass
             timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
             zip_filename = f'MagPro_Cloud_Full_{timestamp}.zip'
-            zip_path = os.path.join(target_dir, zip_filename)
+            zip_path = self.get_unified_path(zip_filename)
             temp_db_path = os.path.join(self.user_data_dir, 'temp_share_source.db')
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
@@ -7081,32 +7059,38 @@ class StockApp(MDApp):
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
             if platform == 'android':
+                from jnius import autoclass, cast
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
                 Intent = autoclass('android.content.Intent')
-                File = autoclass('java.io.File')
                 Uri = autoclass('android.net.Uri')
+                File = autoclass('java.io.File')
+                String = autoclass('java.lang.String')
                 StrictMode = autoclass('android.os.StrictMode')
                 Builder = autoclass('android.os.StrictMode$VmPolicy$Builder')
-                new_policy = Builder().build()
-                StrictMode.setVmPolicy(new_policy)
+                StrictMode.setVmPolicy(Builder().build())
                 zip_file_obj = File(zip_path)
-                raw_uri = Uri.fromFile(zip_file_obj)
-                parcelable_uri = cast('android.os.Parcelable', raw_uri)
+                uri = Uri.fromFile(zip_file_obj)
+                parcelable_uri = cast('android.os.Parcelable', uri)
                 shareIntent = Intent(Intent.ACTION_SEND)
                 shareIntent.setType('application/zip')
                 shareIntent.putExtra(Intent.EXTRA_STREAM, parcelable_uri)
                 shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                shareIntent.putExtra(Intent.EXTRA_SUBJECT, 'Sauvegarde MagPro')
-                shareIntent.putExtra(Intent.EXTRA_TEXT, f'Sauvegarde: {timestamp}')
-                chooser_title = autoclass('java.lang.String')('Partager via:')
+                currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
+                chooser_title = String(f'Sauvegarder fichier: {zip_filename}')
                 currentActivity.startActivity(Intent.createChooser(shareIntent, chooser_title))
+
+                def delete_later(dt):
+                    try:
+                        if os.path.exists(zip_path):
+                            os.remove(zip_path)
+                    except:
+                        pass
+                Clock.schedule_once(delete_later, 60)
             else:
                 import subprocess
                 subprocess.Popen(f'explorer /select,"{zip_path}"')
-                self.notify(f'Fichier créé: {zip_path}', 'success')
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            self.notify(f'Erreur: {e}', 'error')
+            self.notify(f'Erreur de partage: {e}', 'error')
 
     def get_storage_path(self):
         if platform == 'android':
