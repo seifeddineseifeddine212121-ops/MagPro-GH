@@ -7051,9 +7051,8 @@ class StockApp(MDApp):
                 if os.path.exists(target_dir):
                     for filename in os.listdir(target_dir):
                         if filename.startswith('MagPro_Cloud_Full_') and filename.endswith('.zip'):
-                            file_path = os.path.join(target_dir, filename)
                             try:
-                                os.remove(file_path)
+                                os.remove(os.path.join(target_dir, filename))
                             except:
                                 pass
             except:
@@ -7090,12 +7089,12 @@ class StockApp(MDApp):
                 new_policy = Builder().build()
                 StrictMode.setVmPolicy(new_policy)
                 zip_file_obj = File(zip_path)
-                uri = Uri.fromFile(zip_file_obj)
+                raw_uri = Uri.fromFile(zip_file_obj)
+                parcelable_uri = cast('android.os.Parcelable', raw_uri)
                 shareIntent = Intent(Intent.ACTION_SEND)
                 shareIntent.setType('application/zip')
-                shareIntent.putExtra(Intent.EXTRA_STREAM, uri)
+                shareIntent.putExtra(Intent.EXTRA_STREAM, parcelable_uri)
                 shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 shareIntent.putExtra(Intent.EXTRA_SUBJECT, 'Sauvegarde MagPro')
                 shareIntent.putExtra(Intent.EXTRA_TEXT, f'Sauvegarde: {timestamp}')
                 chooser_title = autoclass('java.lang.String')('Partager via:')
