@@ -7035,6 +7035,14 @@ class StockApp(MDApp):
 
     def share_database_file(self):
         try:
+            # مكتبات ضرورية
+            import os
+            import zipfile
+            from datetime import datetime
+            from kivy.utils import platform
+
+            context = None # سنحتاجه لاحقاً للأندرويد
+
             # 1. تحديد مسار الحفظ (الكاش الخارجي هو الأفضل للمشاركة)
             target_dir = ""
             if platform == 'android':
@@ -7043,6 +7051,7 @@ class StockApp(MDApp):
                 currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
                 context = currentActivity.getApplicationContext()
                 
+                # استخدام getExternalCacheDir لضمان إمكانية الوصول من تطبيقات خارجية
                 cache_dir_obj = context.getExternalCacheDir()
                 if not cache_dir_obj:
                     cache_dir_obj = context.getCacheDir()
@@ -7050,7 +7059,7 @@ class StockApp(MDApp):
             else:
                 target_dir = self.user_data_dir
 
-            # 2. تنظيف شامل: حذف أي نسخة قديمة قبل البدء
+            # 2. تنظيف شامل: حذف أي نسخة قديمة
             try:
                 if os.path.exists(target_dir):
                     for filename in os.listdir(target_dir):
@@ -7067,22 +7076,25 @@ class StockApp(MDApp):
             zip_filename = f'MagPro_Cloud_Full_{timestamp}.zip'
             zip_path = os.path.join(target_dir, zip_filename)
 
-            # 4. ضغط قاعدة البيانات (استخدام Vacuum لتقليل الحجم)
+            # 4. ضغط قاعدة البيانات (استخدام Vacuum)
             temp_db_path = os.path.join(self.user_data_dir, 'temp_share_source.db')
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
             
-            if self.db and self.db.conn:
+            if hasattr(self, 'db') and self.db and hasattr(self.db, 'conn'):
                 self.db.conn.execute(f"VACUUM INTO '{temp_db_path}'")
             else:
+                # تأكد من كود الاتصال الخاص بك هنا
                 self.db.connect()
                 self.db.conn.execute(f"VACUUM INTO '{temp_db_path}'")
 
-            # 5. إنشاء ملف ZIP (قاعدة البيانات + الصور)
-            import zipfile
+            # 5. إنشاء ملف ZIP
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                zipf.write(temp_db_path, arcname='magpro_local.db')
+                # إضافة قاعدة البيانات
+                if os.path.exists(temp_db_path):
+                    zipf.write(temp_db_path, arcname='magpro_local.db')
                 
+                # إضافة الصور
                 img_dir = os.path.join(self.user_data_dir, 'product_images')
                 if os.path.exists(img_dir):
                     for root, dirs, files in os.walk(img_dir):
@@ -7091,55 +7103,64 @@ class StockApp(MDApp):
                             arcname = os.path.join('product_images', file)
                             zipf.write(full_path, arcname=arcname)
             
+            # تنظيف الملف المؤقت
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
 
-            # 6. فحص الأمان: لا ترسل ملفاً فارغاً أبداً
+            # 6. فحص الأمان
             if not os.path.exists(zip_path) or os.path.getsize(zip_path) == 0:
-                self.notify("Erreur: Fichier vide (0 octet)", 'error')
+                self.notify("Erreur: Fichier ZIP vide", 'error')
                 return
 
-            # 7. المشاركة (Android) - الكود المضمون
+            # 7. المشاركة (Android) - باستخدام FileProvider (الحل الجذري)
             if platform == 'android':
                 Intent = autoclass('android.content.Intent')
                 File = autoclass('java.io.File')
-                Uri = autoclass('android.net.Uri')
-                StrictMode = autoclass('android.os.StrictMode')
+                FileProvider = autoclass('androidx.core.content.FileProvider')
                 
-                # --- تجاوز القيود الأمنية (لضمان عمل الرابط المباشر) ---
-                Builder = autoclass('android.os.StrictMode$VmPolicy$Builder')
-                new_policy = Builder().build()
-                StrictMode.setVmPolicy(new_policy)
-                # -----------------------------------------------------
-
                 zip_file_obj = File(zip_path)
-                raw_uri = Uri.fromFile(zip_file_obj)
                 
-                # التحويل إلى Parcelable (حل مشكلة Invalid Instance)
-                parcelable_uri = cast('android.os.Parcelable', raw_uri)
+                # تحديد الـ Authority (يجب أن يطابق buildozer.spec)
+                # عادة يكون: package_name + ".fileprovider"
+                package_name = context.getPackageName()
+                authority = package_name + ".fileprovider"
+                
+                try:
+                    # إنشاء URI آمن (content://) بدلاً من (file://)
+                    content_uri = FileProvider.getUriForFile(context, authority, zip_file_obj)
+                except Exception as e:
+                    self.notify(f"Config Error: {e}", 'error')
+                    print(f"FileProvider Error: {e}")
+                    return
+
+                # تحويل إلى Parcelable
+                parcelable_uri = cast('android.os.Parcelable', content_uri)
 
                 shareIntent = Intent(Intent.ACTION_SEND)
-                
-                # هذا النوع يضمن قبول الملف في كل التطبيقات (Zip)
                 shareIntent.setType("application/zip")
                 
                 # إرفاق الملف
                 shareIntent.putExtra(Intent.EXTRA_STREAM, parcelable_uri)
+                shareIntent.putExtra(Intent.EXTRA_SUBJECT, "Sauvegarde MagPro")
+                shareIntent.putExtra(Intent.EXTRA_TEXT, f"Sauvegarde: {timestamp}")
                 
-                # منح صلاحيات القراءة والكتابة للتطبيق المستقبل
+                # أهم خطوة: منح صلاحية القراءة للتطبيق المستقبل
                 shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 shareIntent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION) 
                 
-                # رسالة تظهر في جسم الإيميل أو الوصف
-                shareIntent.putExtra(Intent.EXTRA_SUBJECT, "Sauvegarde MagPro")
-                shareIntent.putExtra(Intent.EXTRA_TEXT, f"Sauvegarde générée le {timestamp}")
-                
-                chooser_title = autoclass('java.lang.String')("Partager la sauvegarde:")
+                chooser_title = autoclass('java.lang.String')("Partager via:")
                 currentActivity.startActivity(Intent.createChooser(shareIntent, chooser_title))
 
             else:
+                # للكمبيوتر
                 import subprocess
-                subprocess.Popen(f'explorer /select,"{zip_path}"')
+                # للأجهزة التي تعمل بنظام ويندوز
+                if os.name == 'nt':
+                    subprocess.Popen(f'explorer /select,"{zip_path}"')
+                else:
+                    # لينكس/ماك
+                    subprocess.Popen(['xdg-open', os.path.dirname(zip_path)])
+                    
                 self.notify(f'Fichier créé: {zip_path}', 'success')
 
         except Exception as e:
