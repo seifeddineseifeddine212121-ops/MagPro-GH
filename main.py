@@ -570,6 +570,29 @@ class DatabaseManager:
         finally:
             conn.close()
 
+    def get_last_product_price_for_entity(self, product_id, entity_id, mode):
+        conn = self.get_connection()
+        try:
+            cursor = conn.cursor()
+            target_types = []
+            if mode == 'return_purchase':
+                target_types = ['BA', 'PURCHASE', 'FF', 'INVOICE_PURCHASE', 'BI']
+            elif mode == 'return_sale':
+                target_types = ['BV', 'SALE', 'FC', 'INVOICE_SALE']
+            else:
+                return None
+            placeholders = ','.join(['?'] * len(target_types))
+            query = f'\n                SELECT ti.price \n                FROM transaction_items ti\n                JOIN transactions t ON ti.transaction_id = t.id\n                WHERE ti.product_id = ? \n                AND t.entity_id = ? \n                AND t.transaction_type IN ({placeholders})\n                ORDER BY t.date DESC, t.id DESC\n                LIMIT 1\n            '
+            params = [product_id, entity_id] + target_types
+            cursor.execute(query, params)
+            row = cursor.fetchone()
+            return float(row[0]) if row else None
+        except Exception as e:
+            print(f'Erreur historique prix: {e}')
+            return None
+        finally:
+            conn.close()
+
     def save_entity(self, entity_data):
         conn = self.get_connection()
         try:
@@ -752,9 +775,8 @@ class DatabaseManager:
                 s_wh = to_decimal(p[1])
                 cost = to_decimal(p[2])
                 total_qty = s_store + s_wh
-                if total_qty < 0:
-                    total_qty = Decimal('0')
-                stats['stock_value'] += total_qty * cost
+                if total_qty > 0:
+                    stats['stock_value'] += total_qty * cost
         except Exception as e:
             print(f'Stats Calculation Error: {e}')
         finally:
@@ -890,9 +912,16 @@ class DatabaseManager:
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
+            cursor.execute('SELECT total_amount, entity_id FROM transactions WHERE id = ?', (trans_id,))
+            row = cursor.fetchone()
+            old_total = float(row['total_amount']) if row and row['total_amount'] else 0.0
+            entity_id = row['entity_id'] if row else None
             cursor.execute('\n                UPDATE transaction_items \n                SET qty = ?, price = ?, cost_price = ? \n                WHERE transaction_id = ? AND product_id = ?\n            ', (new_qty, new_price, new_price, trans_id, product_id))
             new_total = new_qty * new_price
             cursor.execute('\n                UPDATE transactions \n                SET total_amount = ? \n                WHERE id = ?\n            ', (new_total, trans_id))
+            balance_diff = new_total - old_total
+            if entity_id and balance_diff != 0:
+                cursor.execute('\n                    UPDATE suppliers \n                    SET balance = ROUND(balance + ?, 2) \n                    WHERE id = ?\n                ', (balance_diff, entity_id))
             conn.commit()
         finally:
             conn.close()
@@ -941,6 +970,21 @@ class DatabaseManager:
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
+            cursor.execute("\n                SELECT t.id, t.total_amount, t.entity_id, ti.qty, ti.price\n                FROM transactions t\n                JOIN transaction_items ti ON t.id = ti.transaction_id\n                WHERE ti.product_id = ? AND t.transaction_type = 'BI'\n            ", (product_id,))
+            bi_rows = cursor.fetchall()
+            for bi_row in bi_rows:
+                bi_trans_id = bi_row['id']
+                entity_id = bi_row['entity_id']
+                item_amount = float(bi_row['qty'] or 0) * float(bi_row['price'] or 0)
+                if entity_id and item_amount != 0:
+                    cursor.execute('\n                        UPDATE suppliers \n                        SET balance = ROUND(balance - ?, 2) \n                        WHERE id = ?\n                    ', (item_amount, entity_id))
+                cursor.execute('DELETE FROM transaction_items WHERE transaction_id = ? AND product_id = ?', (bi_trans_id, product_id))
+                cursor.execute('SELECT COUNT(*) FROM transaction_items WHERE transaction_id = ?', (bi_trans_id,))
+                remaining = cursor.fetchone()[0]
+                if remaining == 0:
+                    cursor.execute('DELETE FROM transactions WHERE id = ?', (bi_trans_id,))
+                else:
+                    cursor.execute('\n                        UPDATE transactions \n                        SET total_amount = total_amount - ? \n                        WHERE id = ?\n                    ', (item_amount, bi_trans_id))
             cursor.execute('DELETE FROM products WHERE id=?', (product_id,))
             conn.commit()
         finally:
@@ -1042,9 +1086,14 @@ class DatabaseManager:
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
+            cursor.execute('SELECT COUNT(*) FROM transactions WHERE entity_id = ?', (entity_id,))
+            count = cursor.fetchone()[0]
+            if count > 0:
+                return False
             table = 'clients' if entity_type == 'account' else 'suppliers'
             cursor.execute(f'DELETE FROM {table} WHERE id = ?', (entity_id,))
             conn.commit()
+            return True
         finally:
             conn.close()
 
@@ -1092,7 +1141,7 @@ class DatabaseManager:
                     old_paid = float(old_payment_json.get('amount', 0))
                 except:
                     old_paid = 0.0
-                if AppConstants.FINANCIAL_FACTORS.get(old_type) == -1 and (not items_list):
+                if AppConstants.FINANCIAL_FACTORS.get(old_type) == -1 and AppConstants.STOCK_MOVEMENTS.get(old_type, 0) == 0:
                     old_paid = old_total
                 old_s_factor = AppConstants.STOCK_MOVEMENTS.get(old_type, 0)
                 old_f_factor = AppConstants.FINANCIAL_FACTORS.get(old_type, 0)
@@ -1112,11 +1161,14 @@ class DatabaseManager:
                         col = 'stock_warehouse' if old_loc == 'warehouse' else 'stock'
                         cursor.execute(f'UPDATE products SET {col} = ROUND({col} + ?, 3) WHERE id = ?', (revert_qty, p_id))
                 if old_ent_id:
-                    bal_revert = 0.0
-                    prev_impact = old_total * old_f_factor - old_paid
-                    bal_revert = -1 * prev_impact
-                    if old_f_factor == -1 and old_s_factor == 0:
-                        bal_revert = old_total
+                    original_impact = 0.0
+                    if old_f_factor == -1 and old_s_factor != 0:
+                        original_impact = old_total * -1 + old_paid
+                    elif old_f_factor == -1 and old_s_factor == 0:
+                        original_impact = -old_total
+                    else:
+                        original_impact = old_total * old_f_factor - old_paid
+                    bal_revert = original_impact * -1
                     if bal_revert != 0:
                         cursor.execute('SELECT id FROM clients WHERE id=?', (old_ent_id,))
                         target_tbl = 'clients' if cursor.fetchone() else 'suppliers'
@@ -1152,7 +1204,9 @@ class DatabaseManager:
                 cursor.execute('\n                    INSERT INTO transaction_items \n                    (transaction_id, product_id, product_name, qty, price, tva, is_return, cost_price) \n                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n                ', (t_id, safe_pid, item.get('name', 'Product'), qty, price, tva, 1 if item.get('is_return') else 0, current_cost))
             if ent_id:
                 balance_impact = 0.0
-                if fin_factor == -1 and stock_factor == 0:
+                if fin_factor == -1 and stock_factor != 0:
+                    balance_impact = total * -1 + paid_amount
+                elif fin_factor == -1 and stock_factor == 0:
                     balance_impact = -total
                 else:
                     balance_impact = total * fin_factor - paid_amount
@@ -1190,14 +1244,14 @@ class DatabaseManager:
                 paid = to_decimal(details.get('amount', 0))
             except:
                 paid = Decimal('0.00')
-            if t_type in ['CLIENT_PAY', 'SUPPLIER_PAY']:
-                paid = total
             s_factor = AppConstants.STOCK_MOVEMENTS.get(t_type, 0)
             f_factor = AppConstants.FINANCIAL_FACTORS.get(t_type, 0)
+            if f_factor == -1 and s_factor == 0:
+                paid = total
             cursor.execute('SELECT product_id, qty FROM transaction_items WHERE transaction_id=?', (t_id,))
             for item in cursor.fetchall():
                 p_id = item['product_id']
-                if not p_id:
+                if not p_id or p_id == -999:
                     continue
                 qty = to_decimal(item['qty'])
                 if t_type in ['TR', 'TRANSFER']:
@@ -1209,12 +1263,14 @@ class DatabaseManager:
                     col = 'stock_warehouse' if loc == 'warehouse' else 'stock'
                     cursor.execute(f'UPDATE products SET {col} = {col} + ? WHERE id = ?', (float(revert), p_id))
             if ent_id:
-                bal_revert = Decimal('0.00')
-                if t_type in ['CLIENT_PAY', 'SUPPLIER_PAY']:
-                    bal_revert = total
+                original_impact = Decimal('0.00')
+                if f_factor == -1 and s_factor != 0:
+                    original_impact = total * Decimal('-1') + paid
+                elif f_factor == -1 and s_factor == 0:
+                    original_impact = total * Decimal('-1')
                 else:
                     original_impact = total * Decimal(f_factor) - paid
-                    bal_revert = original_impact * Decimal('-1')
+                bal_revert = original_impact * Decimal('-1')
                 bal_revert = quantize_decimal(bal_revert)
                 if bal_revert != 0:
                     cursor.execute('SELECT id FROM clients WHERE id=?', (ent_id,))
@@ -1813,21 +1869,17 @@ class StockApp(MDApp):
             try:
                 from jnius import autoclass
                 Environment = autoclass('android.os.Environment')
-                # محاولة الحصول على مسار التنزيلات العام
                 path = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).getAbsolutePath()
                 return os.path.join(path, filename)
             except:
                 try:
-                    # محاولة بديلة عبر Context
                     PythonActivity = autoclass('org.kivy.android.PythonActivity')
                     context = PythonActivity.mActivity
                     file_dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                     return os.path.join(file_dir.getAbsolutePath(), filename)
                 except:
-                    # الملاذ الأخير: مجلد بيانات التطبيق
                     return os.path.join(self.user_data_dir, filename)
         else:
-            # للكمبيوتر
             return os.path.join(os.path.expanduser('~'), 'Downloads', filename)
 
     def open_android_native_picker(self):
@@ -2108,45 +2160,51 @@ class StockApp(MDApp):
         stock_f = AppConstants.STOCK_MOVEMENTS.get(doc_type, 0)
         is_transfer = doc_type in ['TR', 'TRANSFER']
         curr_price = 0.0
-        if stock_f == -1 or doc_type in ['FP', 'FC', 'RC']:
-            base_price = float(product.get('price', 0) or 0)
-            curr_price = base_price
-            if self.selected_entity:
-                cat = str(self.selected_entity.get('category', 'Détail')).strip()
-                if cat == 'Gros':
-                    val = float(product.get('price_wholesale', 0) or 0)
-                    if val > 0:
-                        curr_price = val
-                elif cat == 'Demi-Gros':
-                    val = float(product.get('price_semi', 0) or 0)
-                    if val > 0:
-                        curr_price = val
-            is_promo_valid = False
-            if product.get('is_promo_active', 0) == 1:
-                promo_exp = str(product.get('promo_expiry', '')).strip()
-                date_valid = True
-                if promo_exp and len(promo_exp) > 5:
-                    try:
-                        from datetime import datetime
-                        exp_date = datetime.strptime(promo_exp, '%Y-%m-%d').date()
-                        if datetime.now().date() > exp_date:
-                            date_valid = False
-                    except:
-                        pass
-                if date_valid:
-                    is_promo_valid = True
-                    p_type = product.get('promo_type', 'fixed')
-                    try:
-                        p_val = float(product.get('promo_value', 0))
-                    except:
-                        p_val = 0.0
-                    if p_type == 'fixed':
-                        if p_val > 0:
-                            curr_price = p_val
-                    else:
-                        curr_price = base_price * (1 - p_val / 100)
-        else:
-            curr_price = float(product.get('purchase_price', product.get('price', 0)) or 0)
+        price_found_in_history = False
+        if mode in ['return_purchase', 'return_sale'] and self.selected_entity and (product.get('id') != -999):
+            history_price = self.db.get_last_product_price_for_entity(product['id'], self.selected_entity['id'], mode)
+            if history_price is not None:
+                curr_price = history_price
+                price_found_in_history = True
+                print(f'[INFO] Prix historique applique: {curr_price}')
+        if not price_found_in_history:
+            if stock_f == -1 or doc_type in ['FP', 'FC', 'RC']:
+                base_price = float(product.get('price', 0) or 0)
+                curr_price = base_price
+                if self.selected_entity:
+                    cat = str(self.selected_entity.get('category', 'Détail')).strip()
+                    if cat == 'Gros':
+                        val = float(product.get('price_wholesale', 0) or 0)
+                        if val > 0:
+                            curr_price = val
+                    elif cat == 'Demi-Gros':
+                        val = float(product.get('price_semi', 0) or 0)
+                        if val > 0:
+                            curr_price = val
+                if mode != 'return_sale' and product.get('is_promo_active', 0) == 1:
+                    promo_exp = str(product.get('promo_expiry', '')).strip()
+                    date_valid = True
+                    if promo_exp and len(promo_exp) > 5:
+                        try:
+                            from datetime import datetime
+                            exp_date = datetime.strptime(promo_exp, '%Y-%m-%d').date()
+                            if datetime.now().date() > exp_date:
+                                date_valid = False
+                        except:
+                            pass
+                    if date_valid:
+                        p_type = product.get('promo_type', 'fixed')
+                        try:
+                            p_val = float(product.get('promo_value', 0))
+                        except:
+                            p_val = 0.0
+                        if p_type == 'fixed':
+                            if p_val > 0:
+                                curr_price = p_val
+                        else:
+                            curr_price = base_price * (1 - p_val / 100)
+            else:
+                curr_price = float(product.get('purchase_price', product.get('price', 0)) or 0)
         prod_name = self.fix_text(product.get('name'))
         price_val_str = fmt_num(curr_price)
         self.active_input_target = 'qty'
@@ -2173,8 +2231,9 @@ class StockApp(MDApp):
             self.price_field.theme_text_color = 'Custom'
             self.price_field.text_color_normal = (0, 0, 0, 1)
             self.price_field.text_color_focus = (0, 0, 0, 1)
-            if stock_f == -1 and 'is_promo_valid' in locals() and is_promo_valid:
-                self.price_field.text_color_normal = (0.8, 0, 0, 1)
+            if price_found_in_history:
+                self.price_field.text_color_normal = (0, 0.5, 0.8, 1)
+                self.price_field.hint_text = 'Dernier Prix (Historique)'
 
             def on_price_touch(instance, touch):
                 if instance.collide_point(*touch.pos):
@@ -4106,7 +4165,7 @@ class StockApp(MDApp):
             add_option('Exporter Produits', 'Direct Excel (.xlsx)', 'file-export', lambda x: self.perform_export())
             add_option('Importer Produits', 'Depuis Excel (.xlsx)', 'file-import', lambda x: [self.settings_menu_dialog.dismiss(), self.import_data_dialog()])
             add_option('Sauvegarde Locale', 'Backup complet (.db)', 'database-export', lambda x: self.perform_local_backup())
-            add_option('Sauvegarde Cloud', 'Partager (Drive, Email...)', 'cloud-upload', lambda x: self.share_database_file())
+            add_option('Partager', '(Quick Share & Bluetooth)', 'cloud-upload', lambda x: self.share_database_file())
             add_option('Restaurer', 'Depuis une sauvegarde', 'backup-restore', lambda x: [self.settings_menu_dialog.dismiss(), self.show_restore_dialog()])
             add_section('MAGASIN')
             add_option('Info Magasin', 'Nom, Adresse, Entête...', 'store', lambda x: self.show_store_settings_dialog(x))
@@ -4926,7 +4985,6 @@ class StockApp(MDApp):
             box_bar.add_widget(btn_scan_field)
             box_bar.add_widget(btn_gen)
             card_info.add_widget(box_bar)
-            # ================================================
             self.field_name = SmartTextField(text=val_name, hint_text='Désignation*', required=True, icon_right='tag-text-outline')
             card_info.add_widget(self.field_name)
             self.field_reference = SmartTextField(text=val_reference, hint_text='Référence', icon_right='text')
@@ -7039,50 +7097,20 @@ class StockApp(MDApp):
 
     def share_database_file(self):
         try:
-            # تجهيز اسم الملف
             timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-            zip_filename = f'MagPro_Backup_{timestamp}.zip'
-
-            # --- خطوة 1: تحديد مسار الحفظ المتوافق مع أندرويد ---
-            zip_path = ""
-            if platform == 'android':
-                try:
-                    from jnius import autoclass, cast
-                    PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                    context = cast('android.content.Context', PythonActivity.mActivity)
-                    # الحفظ في مجلد خارجي خاص بالتطبيق لضمان الصلاحيات
-                    # هذا المجلد مسموح للكتابة والقراءة دون أذونات معقدة
-                    external_file = context.getExternalFilesDir(None)
-                    if external_file:
-                        zip_path = os.path.join(external_file.getAbsolutePath(), zip_filename)
-                    else:
-                        # خطة بديلة
-                        zip_path = os.path.join(self.user_data_dir, zip_filename)
-                except Exception as e:
-                    print(f"Android Path Error: {e}")
-                    zip_path = os.path.join(self.user_data_dir, zip_filename)
-            else:
-                # للكمبيوتر
-                zip_path = os.path.join(os.path.expanduser('~'), 'Downloads', zip_filename)
-
-            # مسار قاعدة البيانات المؤقتة
+            zip_filename = f'MagPro_Cloud_Full_{timestamp}.zip'
+            zip_path = self.get_unified_path(zip_filename)
             temp_db_path = os.path.join(self.user_data_dir, 'temp_share_source.db')
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
-
-            # --- خطوة 2: نسخ وتنظيف قاعدة البيانات ---
             if self.db and self.db.conn:
                 self.db.conn.execute(f"VACUUM INTO '{temp_db_path}'")
             else:
                 self.db.connect()
                 self.db.conn.execute(f"VACUUM INTO '{temp_db_path}'")
-
-            # --- خطوة 3: الضغط (Zip) ---
             import zipfile
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 zipf.write(temp_db_path, arcname='magpro_local.db')
-                
-                # إضافة الصور
                 img_dir = os.path.join(self.user_data_dir, 'product_images')
                 if os.path.exists(img_dir):
                     for root, dirs, files in os.walk(img_dir):
@@ -7090,75 +7118,41 @@ class StockApp(MDApp):
                             full_path = os.path.join(root, file)
                             arcname = os.path.join('product_images', file)
                             zipf.write(full_path, arcname=arcname)
-
-            # تنظيف الملف المؤقت
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
-
-            # --- خطوة 4: المشاركة الإجبارية (Android Intent) ---
             if platform == 'android':
                 from jnius import autoclass, cast
-                
-                # استدعاء الكلاسات الضرورية
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
                 Intent = autoclass('android.content.Intent')
                 Uri = autoclass('android.net.Uri')
                 File = autoclass('java.io.File')
-                StrictMode = autoclass('android.os.StrictMode')
-                
-                # !!! الحل السحري: تعطيل فحص file:// URI !!!
-                # هذا السطر يجبر أندرويد على تجاهل الخطأ الأمني والسماح بإرفاق الملف
-                try:
-                    Builder = autoclass('android.os.StrictMode$VmPolicy$Builder')
-                    policy = Builder().build()
-                    StrictMode.setVmPolicy(policy)
-                except Exception as e:
-                    print(f"StrictMode Error: {e}")
-
-                # إعداد الملف
-                file_to_share = File(zip_path)
-                
-                # التأكد من وجود الملف فعلياً
-                if not file_to_share.exists():
-                    self.notify("Erreur: Le fichier zip n'a pas été créé", "error")
-                    return
-
-                # تحويل المسار إلى URI
-                # نستخدم parse لفرض البروتوكول file:// يدوياً
-                uri = Uri.parse("file://" + zip_path)
-                
-                # إنشاء Intent المشاركة
-                shareIntent = Intent(Intent.ACTION_SEND)
-                
-                # تغيير النوع لضمان قبول واتساب (application/zip أحياناً يُرفض، لذا نستخدم */*)
-                shareIntent.setType("application/zip")
-                
-                # إرفاق الملف (أهم جزء)
-                shareIntent.putExtra(Intent.EXTRA_STREAM, cast('android.os.Parcelable', uri))
-                
-                # إضافة أذونات القراءة للتطبيقات الأخرى
-                shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                
-                # إضافة نصوص للمشاركة
                 String = autoclass('java.lang.String')
-                shareIntent.putExtra(Intent.EXTRA_SUBJECT, String("Sauvegarde MagPro"))
-                shareIntent.putExtra(Intent.EXTRA_TEXT, String(f"Sauvegarde du {timestamp}"))
-
-                # تشغيل القائمة
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                StrictMode = autoclass('android.os.StrictMode')
+                Builder = autoclass('android.os.StrictMode$VmPolicy$Builder')
+                StrictMode.setVmPolicy(Builder().build())
+                zip_file_obj = File(zip_path)
+                uri = Uri.fromFile(zip_file_obj)
+                parcelable_uri = cast('android.os.Parcelable', uri)
+                shareIntent = Intent(Intent.ACTION_SEND)
+                shareIntent.setType('application/zip')
+                shareIntent.putExtra(Intent.EXTRA_STREAM, parcelable_uri)
+                shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
-                chooser = Intent.createChooser(shareIntent, String("Partager la sauvegarde via..."))
-                currentActivity.startActivity(chooser)
+                chooser_title = String(f'Sauvegarder fichier: {zip_filename}')
+                currentActivity.startActivity(Intent.createChooser(shareIntent, chooser_title))
 
+                def delete_later(dt):
+                    try:
+                        if os.path.exists(zip_path):
+                            os.remove(zip_path)
+                    except:
+                        pass
+                Clock.schedule_once(delete_later, 60)
             else:
-                # للكمبيوتر
                 import subprocess
                 subprocess.Popen(f'explorer /select,"{zip_path}"')
-                self.notify(f"Fichier créé: {zip_filename}", "success")
-
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            self.notify(f'Erreur Partage: {e}', 'error')
+            self.notify(f'Erreur de partage: {e}', 'error')
 
     def get_storage_path(self):
         if platform == 'android':
