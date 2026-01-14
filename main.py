@@ -7035,136 +7035,62 @@ class StockApp(MDApp):
 
     def share_database_file(self):
         try:
-
-            local_dir = self.user_data_dir
             timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-            final_zip_name = f'MagPro_Backup_{timestamp}.zip'
-            temp_zip_path = os.path.join(local_dir, final_zip_name)
-
-            # تنظيف ملفات قديمة مؤقتة
-            if os.path.exists(temp_zip_path):
-                os.remove(temp_zip_path)
-
-            # 2. تجهيز وضغط قاعدة البيانات (Vacuum)
-            temp_db_path = os.path.join(local_dir, 'temp_share_source.db')
-            if hasattr(self, 'db') and self.db and hasattr(self.db, 'conn'):
+            zip_filename = f'MagPro_Cloud_Full_{timestamp}.zip'
+            zip_path = self.get_unified_path(zip_filename)
+            temp_db_path = os.path.join(self.user_data_dir, 'temp_share_source.db')
+            if os.path.exists(temp_db_path):
+                os.remove(temp_db_path)
+            if self.db and self.db.conn:
                 self.db.conn.execute(f"VACUUM INTO '{temp_db_path}'")
             else:
                 self.db.connect()
                 self.db.conn.execute(f"VACUUM INTO '{temp_db_path}'")
-
-            # 3. إنشاء ملف ZIP محلياً
-            with zipfile.ZipFile(temp_zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                if os.path.exists(temp_db_path):
-                    zipf.write(temp_db_path, arcname='magpro_local.db')
-                
-                img_dir = os.path.join(local_dir, 'product_images')
+            import zipfile
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                zipf.write(temp_db_path, arcname='magpro_local.db')
+                img_dir = os.path.join(self.user_data_dir, 'product_images')
                 if os.path.exists(img_dir):
                     for root, dirs, files in os.walk(img_dir):
                         for file in files:
                             full_path = os.path.join(root, file)
                             arcname = os.path.join('product_images', file)
                             zipf.write(full_path, arcname=arcname)
-            
-            # حذف نسخة DB المؤقتة
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
-
-            # التحقق من أن الملف تم إنشاؤه وليس فارغاً
-            if not os.path.exists(temp_zip_path) or os.path.getsize(temp_zip_path) == 0:
-                self.notify("Erreur: Fichier vide", 'error')
-                return
-
-            # 4. المشاركة (Android) - طريقة MediaStore (بدون XML)
             if platform == 'android':
                 from jnius import autoclass, cast
-                
-                # استيراد كلاسات الجافا
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
-                currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
-                Context = autoclass('android.content.Context')
-                context = currentActivity.getApplicationContext()
-                
-                ContentValues = autoclass('android.content.ContentValues')
-                MediaStore = autoclass('android.provider.MediaStore')
-                FileInputStream = autoclass('java.io.FileInputStream')
                 Intent = autoclass('android.content.Intent')
-                
-                # الوصول إلى جدول "Downloads" في الأندرويد
-                # هذا يعطينا رابطاً عاماً (content://) لا يحتاج لصلاحيات خاصة
-                content_uri = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-                
-                cv = ContentValues()
-                cv.put(MediaStore.MediaColumns.DISPLAY_NAME, final_zip_name)
-                cv.put(MediaStore.MediaColumns.MIME_TYPE, "application/zip")
-                # للأندرويد 10 وما فوق، نحدد المجلد داخل Downloads
-                cv.put(MediaStore.MediaColumns.RELATIVE_PATH, "Download/MagPro_Backups")
-
-                contentResolver = context.getContentResolver()
-                
-                # إدراج الملف في النظام والحصول على URI
-                uri = contentResolver.insert(content_uri, cv)
-                
-                if not uri:
-                    self.notify("Erreur création MediaStore URI", 'error')
-                    return
-
-                # نسخ البيانات من الملف المؤقت إلى الـ URI الجديد
-                try:
-                    # فتح ملف الـ Zip المحلي للقراءة
-                    input_stream = FileInputStream(temp_zip_path)
-                    # فتح الـ URI للكتابة
-                    output_stream = contentResolver.openOutputStream(uri)
-                    
-                    # نقل البيانات (Buffer copy)
-                    buffer_size = 1024 * 4
-                    # نحتاج byte array من الجافا ولكن الحل الأبسط هو القراءة كـ bytes في بايثون
-                    # ولكن لضمان السرعة مع الملفات الكبيرة نستخدم jnius streams
-                    
-                    # طريقة مبسطة للنقل:
-                    # قراءة الملف المحلي كـ bytes في بايثون وكتابته في الستريم
-                    with open(temp_zip_path, 'rb') as f:
-                        while True:
-                            chunk = f.read(buffer_size)
-                            if not chunk:
-                                break
-                            # كتابة الـ chunk (تحتاج تحويل لـ Java bytes، لكن Jnius قد يعقد الأمر)
-                            # الحل الأسهل: استخدام copyStream في Java إذا أمكن، أو الكتابة المباشرة:
-                            # بما أن الكتابة المباشرة معقدة، سنستخدم الطريقة التالية الأبسط:
-                            output_stream.write(chunk)
-                    
-                    input_stream.close()
-                    output_stream.close()
-                    
-                except Exception as e:
-                    self.notify(f"Erreur copie: {e}", 'error')
-                    print(f"Copy Error: {e}")
-                    return
-
-                # المشاركة باستخدام الـ URI الجديد
+                Uri = autoclass('android.net.Uri')
+                File = autoclass('java.io.File')
+                String = autoclass('java.lang.String')
+                StrictMode = autoclass('android.os.StrictMode')
+                Builder = autoclass('android.os.StrictMode$VmPolicy$Builder')
+                StrictMode.setVmPolicy(Builder().build())
+                zip_file_obj = File(zip_path)
+                uri = Uri.fromFile(zip_file_obj)
+                parcelable_uri = cast('android.os.Parcelable', uri)
                 shareIntent = Intent(Intent.ACTION_SEND)
-                shareIntent.setType("application/zip")
-                shareIntent.putExtra(Intent.EXTRA_STREAM, uri)
+                shareIntent.setType('application/zip')
+                shareIntent.putExtra(Intent.EXTRA_STREAM, parcelable_uri)
                 shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                
-                chooser_title = autoclass('java.lang.String')("Sauvegarder via:")
+                currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
+                chooser_title = String(f'Sauvegarder fichier: {zip_filename}')
                 currentActivity.startActivity(Intent.createChooser(shareIntent, chooser_title))
-                
-                self.notify("Sauvegarde prête dans Downloads", 'success')
 
+                def delete_later(dt):
+                    try:
+                        if os.path.exists(zip_path):
+                            os.remove(zip_path)
+                    except:
+                        pass
+                Clock.schedule_once(delete_later, 60)
             else:
-                # للكبيوتر (ويندوز/لينكس)
                 import subprocess
-                if os.name == 'nt':
-                    subprocess.Popen(f'explorer /select,"{temp_zip_path}"')
-                else:
-                    subprocess.Popen(['xdg-open', os.path.dirname(temp_zip_path)])
-                self.notify(f'Fichier créé: {temp_zip_path}', 'success')
-
+                subprocess.Popen(f'explorer /select,"{zip_path}"')
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            self.notify(f'Erreur Fatale: {e}', 'error')
+            self.notify(f'Erreur de partage: {e}', 'error')
 
     def get_storage_path(self):
         if platform == 'android':
