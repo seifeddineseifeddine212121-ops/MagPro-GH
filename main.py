@@ -4165,7 +4165,7 @@ class StockApp(MDApp):
             add_option('Exporter Produits', 'Direct Excel (.xlsx)', 'file-export', lambda x: self.perform_export())
             add_option('Importer Produits', 'Depuis Excel (.xlsx)', 'file-import', lambda x: [self.settings_menu_dialog.dismiss(), self.import_data_dialog()])
             add_option('Sauvegarde Locale', 'Backup complet (.db)', 'database-export', lambda x: self.perform_local_backup())
-            add_option('Partager', '(Quick Share & Bluetooth)', 'cloud-upload', lambda x: self.share_database_file())
+            add_option('Partager (.db)', '(Quick Share & Bluetooth)', 'cloud-upload', lambda x: self.share_database_file())
             add_option('Restaurer', 'Depuis une sauvegarde', 'backup-restore', lambda x: [self.settings_menu_dialog.dismiss(), self.show_restore_dialog()])
             add_section('MAGASIN')
             add_option('Info Magasin', 'Nom, Adresse, Entête...', 'store', lambda x: self.show_store_settings_dialog(x))
