@@ -7039,30 +7039,50 @@ class StockApp(MDApp):
 
     def share_database_file(self):
         try:
-            # 1. إعداد اسم الملف والمسارات
+            # تجهيز اسم الملف
             timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
             zip_filename = f'MagPro_Backup_{timestamp}.zip'
-            zip_path = self.get_unified_path(zip_filename)
-            
-            # مسار قاعدة البيانات المؤقتة لتجنب مشاكل القفل
+
+            # --- خطوة 1: تحديد مسار الحفظ المتوافق مع أندرويد ---
+            zip_path = ""
+            if platform == 'android':
+                try:
+                    from jnius import autoclass, cast
+                    PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                    context = cast('android.content.Context', PythonActivity.mActivity)
+                    # الحفظ في مجلد خارجي خاص بالتطبيق لضمان الصلاحيات
+                    # هذا المجلد مسموح للكتابة والقراءة دون أذونات معقدة
+                    external_file = context.getExternalFilesDir(None)
+                    if external_file:
+                        zip_path = os.path.join(external_file.getAbsolutePath(), zip_filename)
+                    else:
+                        # خطة بديلة
+                        zip_path = os.path.join(self.user_data_dir, zip_filename)
+                except Exception as e:
+                    print(f"Android Path Error: {e}")
+                    zip_path = os.path.join(self.user_data_dir, zip_filename)
+            else:
+                # للكمبيوتر
+                zip_path = os.path.join(os.path.expanduser('~'), 'Downloads', zip_filename)
+
+            # مسار قاعدة البيانات المؤقتة
             temp_db_path = os.path.join(self.user_data_dir, 'temp_share_source.db')
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
 
-            # 2. إنشاء نسخة نظيفة من قاعدة البيانات (Vacuum)
+            # --- خطوة 2: نسخ وتنظيف قاعدة البيانات ---
             if self.db and self.db.conn:
                 self.db.conn.execute(f"VACUUM INTO '{temp_db_path}'")
             else:
                 self.db.connect()
                 self.db.conn.execute(f"VACUUM INTO '{temp_db_path}'")
 
-            # 3. إنشاء ملف ZIP (يحتوي قاعدة البيانات + الصور)
+            # --- خطوة 3: الضغط (Zip) ---
             import zipfile
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                # إضافة قاعدة البيانات
                 zipf.write(temp_db_path, arcname='magpro_local.db')
                 
-                # إضافة مجلد الصور
+                # إضافة الصور
                 img_dir = os.path.join(self.user_data_dir, 'product_images')
                 if os.path.exists(img_dir):
                     for root, dirs, files in os.walk(img_dir):
@@ -7071,67 +7091,74 @@ class StockApp(MDApp):
                             arcname = os.path.join('product_images', file)
                             zipf.write(full_path, arcname=arcname)
 
-            # حذف قاعدة البيانات المؤقتة بعد الضغط
+            # تنظيف الملف المؤقت
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
 
-            # 4. عملية المشاركة (Android Intent)
+            # --- خطوة 4: المشاركة الإجبارية (Android Intent) ---
             if platform == 'android':
                 from jnius import autoclass, cast
-                PythonActivity = autoclass('org.kivy.android.PythonActivity')
+                
+                # استدعاء الكلاسات الضرورية
                 Intent = autoclass('android.content.Intent')
                 Uri = autoclass('android.net.Uri')
                 File = autoclass('java.io.File')
-                String = autoclass('java.lang.String')
-                
-                # تجاوز قيود Android لمشاركة الملفات المحلية (FileUriExposed)
                 StrictMode = autoclass('android.os.StrictMode')
-                Builder = autoclass('android.os.StrictMode$VmPolicy$Builder')
-                StrictMode.setVmPolicy(Builder().build())
+                
+                # !!! الحل السحري: تعطيل فحص file:// URI !!!
+                # هذا السطر يجبر أندرويد على تجاهل الخطأ الأمني والسماح بإرفاق الملف
+                try:
+                    Builder = autoclass('android.os.StrictMode$VmPolicy$Builder')
+                    policy = Builder().build()
+                    StrictMode.setVmPolicy(policy)
+                except Exception as e:
+                    print(f"StrictMode Error: {e}")
 
-                # تحضير الملف للمشاركة
-                zip_file_obj = File(zip_path)
-                uri = Uri.fromFile(zip_file_obj)
-                parcelable_uri = cast('android.os.Parcelable', uri)
+                # إعداد الملف
+                file_to_share = File(zip_path)
+                
+                # التأكد من وجود الملف فعلياً
+                if not file_to_share.exists():
+                    self.notify("Erreur: Le fichier zip n'a pas été créé", "error")
+                    return
 
-                # إعداد الـ Intent
+                # تحويل المسار إلى URI
+                # نستخدم parse لفرض البروتوكول file:// يدوياً
+                uri = Uri.parse("file://" + zip_path)
+                
+                # إنشاء Intent المشاركة
                 shareIntent = Intent(Intent.ACTION_SEND)
-                # استخدام application/zip يضمن ظهور تطبيقات مثل WhatsApp و Gmail
-                shareIntent.setType('application/zip') 
                 
-                # إرفاق الملف
-                shareIntent.putExtra(Intent.EXTRA_STREAM, parcelable_uri)
+                # تغيير النوع لضمان قبول واتساب (application/zip أحياناً يُرفض، لذا نستخدم */*)
+                shareIntent.setType("application/zip")
                 
-                # إضافة عنوان ونص (مفيد لـ Gmail)
-                shareIntent.putExtra(Intent.EXTRA_SUBJECT, String(f"Sauvegarde MagPro: {timestamp}"))
-                shareIntent.putExtra(Intent.EXTRA_TEXT, String("Veuillez trouver ci-joint le fichier de sauvegarde."))
+                # إرفاق الملف (أهم جزء)
+                shareIntent.putExtra(Intent.EXTRA_STREAM, cast('android.os.Parcelable', uri))
                 
+                # إضافة أذونات القراءة للتطبيقات الأخرى
                 shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                
+                # إضافة نصوص للمشاركة
+                String = autoclass('java.lang.String')
+                shareIntent.putExtra(Intent.EXTRA_SUBJECT, String("Sauvegarde MagPro"))
+                shareIntent.putExtra(Intent.EXTRA_TEXT, String(f"Sauvegarde du {timestamp}"))
 
+                # تشغيل القائمة
+                PythonActivity = autoclass('org.kivy.android.PythonActivity')
                 currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
-                chooser_title = String(f'Partager la sauvegarde via...')
-                currentActivity.startActivity(Intent.createChooser(shareIntent, chooser_title))
+                chooser = Intent.createChooser(shareIntent, String("Partager la sauvegarde via..."))
+                currentActivity.startActivity(chooser)
 
-                # وظيفة لحذف الملف المضغوط بعد دقيقة للحفاظ على المساحة
-                def delete_later(dt):
-                    try:
-                        if os.path.exists(zip_path):
-                            os.remove(zip_path)
-                    except:
-                        pass
-                Clock.schedule_once(delete_later, 60)
-            
             else:
-                # للكبيوتر (Windows/Linux)
+                # للكمبيوتر
                 import subprocess
                 subprocess.Popen(f'explorer /select,"{zip_path}"')
                 self.notify(f"Fichier créé: {zip_filename}", "success")
 
         except Exception as e:
-            self.notify(f'Erreur de partage: {e}', 'error')
-            print(f"Share Error: {e}")
-
-
+            import traceback
+            traceback.print_exc()
+            self.notify(f'Erreur Partage: {e}', 'error')
 
     def get_storage_path(self):
         if platform == 'android':
