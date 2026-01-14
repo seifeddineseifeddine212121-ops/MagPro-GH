@@ -7054,11 +7054,10 @@ class StockApp(MDApp):
                             file_path = os.path.join(target_dir, filename)
                             try:
                                 os.remove(file_path)
-                                print(f'Deleted old backup: {filename}')
-                            except Exception as e:
-                                print(f'Could not delete {filename}: {e}')
-            except Exception as e:
-                print(f'Error cleaning cache: {e}')
+                            except:
+                                pass
+            except:
+                pass
             timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
             zip_filename = f'MagPro_Cloud_Full_{timestamp}.zip'
             zip_path = os.path.join(target_dir, zip_filename)
@@ -7083,19 +7082,22 @@ class StockApp(MDApp):
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
             if platform == 'android':
-                File = autoclass('java.io.File')
-                FileProvider = autoclass('androidx.core.content.FileProvider')
                 Intent = autoclass('android.content.Intent')
+                File = autoclass('java.io.File')
+                Uri = autoclass('android.net.Uri')
+                StrictMode = autoclass('android.os.StrictMode')
+                Builder = autoclass('android.os.StrictMode$VmPolicy$Builder')
+                new_policy = Builder().build()
+                StrictMode.setVmPolicy(new_policy)
                 zip_file_obj = File(zip_path)
-                package_name = context.getPackageName()
-                authority = package_name + '.fileprovider'
-                uri = FileProvider.getUriForFile(context, authority, zip_file_obj)
+                uri = Uri.fromFile(zip_file_obj)
                 shareIntent = Intent(Intent.ACTION_SEND)
                 shareIntent.setType('application/zip')
                 shareIntent.putExtra(Intent.EXTRA_STREAM, uri)
                 shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 shareIntent.putExtra(Intent.EXTRA_SUBJECT, 'Sauvegarde MagPro')
-                shareIntent.putExtra(Intent.EXTRA_TEXT, f'Sauvegarde générée le {timestamp}')
+                shareIntent.putExtra(Intent.EXTRA_TEXT, f'Sauvegarde: {timestamp}')
                 chooser_title = autoclass('java.lang.String')('Partager via:')
                 currentActivity.startActivity(Intent.createChooser(shareIntent, chooser_title))
             else:
@@ -7105,7 +7107,7 @@ class StockApp(MDApp):
         except Exception as e:
             import traceback
             traceback.print_exc()
-            self.notify(f'Erreur de partage: {e}', 'error')
+            self.notify(f'Erreur: {e}', 'error')
 
     def get_storage_path(self):
         if platform == 'android':
