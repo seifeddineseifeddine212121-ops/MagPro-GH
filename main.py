@@ -142,8 +142,8 @@ class AppConstants:
 
     @staticmethod
     def get_entity_type(mode):
-        supplier_modes = ['purchase', 'return_purchase', 'invoice_purchase', 'order_purchase', 'bi', 'supplier_payment']
-        if mode in supplier_modes:
+        supplier_modes = ['purchase', 'invoice_purchase', 'order_purchase', 'return_purchase', 'ba', 'ff', 'dp', 'rf', 'bi', 'supplier_payment', 'reglement']
+        if mode.lower() in supplier_modes:
             return 'supplier'
         return 'account'
 
@@ -1059,16 +1059,14 @@ class DatabaseManager:
             if sort_by == 'balance':
                 sql += ' ORDER BY balance DESC'
             elif sort_by == 'active' and active_ids:
-                ids_str = ','.join(map(str, active_ids))
+                ids_str = ','.join(map(str, active_ids)) if active_ids else '0'
                 sql += f' ORDER BY CASE WHEN id IN ({ids_str}) THEN 0 ELSE 1 END, name COLLATE NOCASE ASC'
             else:
                 sql += ' ORDER BY name COLLATE NOCASE ASC'
             sql += ' LIMIT ? OFFSET ?'
-            params.append(limit)
-            params.append(offset)
+            params.extend([limit, offset])
             cursor.execute(sql, params)
-            rows = cursor.fetchall()
-            return [dict(row) for row in rows]
+            return [dict(row) for row in cursor.fetchall()]
         finally:
             conn.close()
 
@@ -1104,10 +1102,12 @@ class DatabaseManager:
             cursor.execute('BEGIN')
             t_id = transaction_data.get('id')
             t_type = transaction_data.get('doc_type', 'SALE').upper()
+            if t_type in ['BA', 'FF', 'RF', 'DP', 'PURCHASE', 'INVOICE_PURCHASE', 'ORDER_PURCHASE', 'RETURN_PURCHASE', 'SUPPLIER_PAY', 'REGLEMENT', 'BI']:
+                entity_category_val = 'supplier'
+            else:
+                entity_category_val = 'client'
             stock_factor = AppConstants.STOCK_MOVEMENTS.get(t_type, 0)
             fin_factor = AppConstants.FINANCIAL_FACTORS.get(t_type, 0)
-            is_supplier_op = stock_factor == 1 or 'SUPPLIER' in t_type or 'PURCHASE' in t_type
-            entity_category_val = 'supplier' if is_supplier_op else 'client'
             user = transaction_data.get('user_name', '')
             total = float(transaction_data.get('amount', 0))
             items_list = transaction_data.get('items', [])
@@ -1126,7 +1126,7 @@ class DatabaseManager:
                     row = cursor.fetchone()
                     final_ref = row[0] if row else self.get_invoice_number(t_type)
                 else:
-                    final_ref = self.get_invoice_number(t_type)
+                    final_ref = transaction_data.get('custom_label') or self.get_invoice_number(t_type)
                 paid_amount = float(payment_info.get('amount', 0)) if payment_info else 0.0
             payment_json = json.dumps(payment_info, ensure_ascii=False)
             if t_id:
@@ -1143,8 +1143,6 @@ class DatabaseManager:
                     old_paid = 0.0
                 if AppConstants.FINANCIAL_FACTORS.get(old_type) == -1 and AppConstants.STOCK_MOVEMENTS.get(old_type, 0) == 0:
                     old_paid = old_total
-                old_s_factor = AppConstants.STOCK_MOVEMENTS.get(old_type, 0)
-                old_f_factor = AppConstants.FINANCIAL_FACTORS.get(old_type, 0)
                 cursor.execute('SELECT product_id, qty FROM transaction_items WHERE transaction_id=?', (t_id,))
                 old_items = cursor.fetchall()
                 for item in old_items:
@@ -1156,12 +1154,13 @@ class DatabaseManager:
                         col_src = 'stock_warehouse' if old_loc == 'warehouse' else 'stock'
                         col_dst = 'stock' if old_loc == 'warehouse' else 'stock_warehouse'
                         cursor.execute(f'UPDATE products SET {col_src} = ROUND({col_src} + ?, 3), {col_dst} = ROUND({col_dst} - ?, 3) WHERE id = ?', (qty, qty, p_id))
-                    elif old_s_factor != 0:
-                        revert_qty = qty * (old_s_factor * -1)
+                    elif AppConstants.STOCK_MOVEMENTS.get(old_type, 0) != 0:
+                        revert_qty = qty * (AppConstants.STOCK_MOVEMENTS.get(old_type) * -1)
                         col = 'stock_warehouse' if old_loc == 'warehouse' else 'stock'
                         cursor.execute(f'UPDATE products SET {col} = ROUND({col} + ?, 3) WHERE id = ?', (revert_qty, p_id))
                 if old_ent_id:
-                    original_impact = 0.0
+                    old_f_factor = AppConstants.FINANCIAL_FACTORS.get(old_type, 0)
+                    old_s_factor = AppConstants.STOCK_MOVEMENTS.get(old_type, 0)
                     if old_f_factor == -1 and old_s_factor != 0:
                         original_impact = old_total * -1 + old_paid
                     elif old_f_factor == -1 and old_s_factor == 0:
@@ -1170,9 +1169,9 @@ class DatabaseManager:
                         original_impact = old_total * old_f_factor - old_paid
                     bal_revert = original_impact * -1
                     if bal_revert != 0:
-                        cursor.execute('SELECT id FROM clients WHERE id=?', (old_ent_id,))
-                        target_tbl = 'clients' if cursor.fetchone() else 'suppliers'
-                        cursor.execute(f'UPDATE {target_tbl} SET balance = ROUND(balance + ?, 2) WHERE id = ?', (bal_revert, old_ent_id))
+                        old_cat = old_trans.get('entity_category', 'client')
+                        target_tbl_old = 'suppliers' if old_cat == 'supplier' else 'clients'
+                        cursor.execute(f'UPDATE {target_tbl_old} SET balance = ROUND(balance + ?, 2) WHERE id = ?', (bal_revert, old_ent_id))
                 cursor.execute('DELETE FROM transaction_items WHERE transaction_id=?', (t_id,))
                 cursor.execute('\n                    UPDATE transactions \n                    SET total_amount=?, entity_id=?, entity_category=?, user_name=?, note=?, payment_details=?, location=?, transaction_type=?\n                    WHERE id=?\n                ', (total, ent_id, entity_category_val, user, note, payment_json, new_location, t_type, t_id))
             else:
@@ -1190,7 +1189,6 @@ class DatabaseManager:
                     res = cursor.fetchone()
                     if res:
                         current_cost = float(res[0] or 0)
-                if not is_virtual:
                     if t_type in ['TR', 'TRANSFER']:
                         col_src = 'stock_warehouse' if new_location == 'warehouse' else 'stock'
                         col_dst = 'stock' if new_location == 'warehouse' else 'stock_warehouse'
@@ -1203,7 +1201,6 @@ class DatabaseManager:
                 safe_pid = p_id if p_id and p_id != -999 else 0
                 cursor.execute('\n                    INSERT INTO transaction_items \n                    (transaction_id, product_id, product_name, qty, price, tva, is_return, cost_price) \n                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)\n                ', (t_id, safe_pid, item.get('name', 'Product'), qty, price, tva, 1 if item.get('is_return') else 0, current_cost))
             if ent_id:
-                balance_impact = 0.0
                 if fin_factor == -1 and stock_factor != 0:
                     balance_impact = total * -1 + paid_amount
                 elif fin_factor == -1 and stock_factor == 0:
@@ -1213,9 +1210,6 @@ class DatabaseManager:
                 if balance_impact != 0:
                     target_tbl = 'suppliers' if entity_category_val == 'supplier' else 'clients'
                     cursor.execute(f'UPDATE {target_tbl} SET balance = ROUND(balance + ?, 2) WHERE id = ?', (balance_impact, ent_id))
-                    if cursor.rowcount == 0:
-                        alt_tbl = 'clients' if target_tbl == 'suppliers' else 'suppliers'
-                        cursor.execute(f'UPDATE {alt_tbl} SET balance = ROUND(balance + ?, 2) WHERE id = ?', (balance_impact, ent_id))
             conn.commit()
             return t_id
         except Exception as e:
@@ -1234,54 +1228,30 @@ class DatabaseManager:
             if not trans:
                 return
             trans = dict(trans)
-            t_type = trans.get('transaction_type', '').upper()
-            ent_id = trans.get('entity_id')
-            total = to_decimal(trans.get('total_amount', 0))
-            loc = trans.get('location', 'store')
-            paid = Decimal('0.00')
-            try:
-                details = json.loads(trans.get('payment_details', '{}'))
-                paid = to_decimal(details.get('amount', 0))
-            except:
-                paid = Decimal('0.00')
-            s_factor = AppConstants.STOCK_MOVEMENTS.get(t_type, 0)
-            f_factor = AppConstants.FINANCIAL_FACTORS.get(t_type, 0)
-            if f_factor == -1 and s_factor == 0:
-                paid = total
+            t_type = trans['transaction_type']
+            cat = trans['entity_category']
+            ent_id = trans['entity_id']
+            total = float(trans['total_amount'])
             cursor.execute('SELECT product_id, qty FROM transaction_items WHERE transaction_id=?', (t_id,))
+            s_factor = AppConstants.STOCK_MOVEMENTS.get(t_type, 0)
+            loc = trans.get('location', 'store')
+            col = 'stock_warehouse' if loc == 'warehouse' else 'stock'
             for item in cursor.fetchall():
-                p_id = item['product_id']
-                if not p_id or p_id == -999:
-                    continue
-                qty = to_decimal(item['qty'])
-                if t_type in ['TR', 'TRANSFER']:
-                    col_src = 'stock_warehouse' if loc == 'warehouse' else 'stock'
-                    col_dst = 'stock' if loc == 'warehouse' else 'stock_warehouse'
-                    cursor.execute(f'UPDATE products SET {col_src} = {col_src} + ?, {col_dst} = {col_dst} - ? WHERE id = ?', (float(qty), float(qty), p_id))
-                elif s_factor != 0:
-                    revert = qty * Decimal(s_factor * -1)
-                    col = 'stock_warehouse' if loc == 'warehouse' else 'stock'
-                    cursor.execute(f'UPDATE products SET {col} = {col} + ? WHERE id = ?', (float(revert), p_id))
+                if item['product_id'] and item['product_id'] != -999:
+                    revert_qty = float(item['qty']) * (s_factor * -1)
+                    cursor.execute(f'UPDATE products SET {col} = {col} + ? WHERE id = ?', (revert_qty, item['product_id']))
             if ent_id:
-                original_impact = Decimal('0.00')
-                if f_factor == -1 and s_factor != 0:
-                    original_impact = total * Decimal('-1') + paid
-                elif f_factor == -1 and s_factor == 0:
-                    original_impact = total * Decimal('-1')
-                else:
-                    original_impact = total * Decimal(f_factor) - paid
-                bal_revert = original_impact * Decimal('-1')
-                bal_revert = quantize_decimal(bal_revert)
-                if bal_revert != 0:
-                    cursor.execute('SELECT id FROM clients WHERE id=?', (ent_id,))
-                    tbl = 'clients' if cursor.fetchone() else 'suppliers'
-                    cursor.execute(f'UPDATE {tbl} SET balance = balance + ? WHERE id = ?', (float(bal_revert), ent_id))
+                f_factor = AppConstants.FINANCIAL_FACTORS.get(t_type, 0)
+                try:
+                    paid = float(json.loads(trans['payment_details']).get('amount', 0))
+                except:
+                    paid = 0.0
+                impact = total * f_factor - paid
+                table = 'suppliers' if cat == 'supplier' else 'clients'
+                cursor.execute(f'UPDATE {table} SET balance = balance - ? WHERE id = ?', (impact, ent_id))
             cursor.execute('DELETE FROM transaction_items WHERE transaction_id=?', (t_id,))
             cursor.execute('DELETE FROM transactions WHERE id=?', (t_id,))
             conn.commit()
-        except Exception as e:
-            conn.rollback()
-            print(f'Delete Error: {e}')
         finally:
             conn.close()
 
@@ -1319,23 +1289,21 @@ class DatabaseManager:
         try:
             cursor = conn.cursor()
             cursor.execute('SELECT * FROM transactions WHERE id = ?', (t_id,))
-            trans_row = cursor.fetchone()
-            if not trans_row:
+            t_row = cursor.fetchone()
+            if not t_row:
                 return None
-            trans = dict(trans_row)
-            entity_id = trans.get('entity_id')
+            trans = dict(t_row)
+            ent_id = trans.get('entity_id')
+            cat = trans.get('entity_category', 'client')
             entity = {}
-            if entity_id:
-                cursor.execute('SELECT * FROM clients WHERE id = ?', (entity_id,))
-                ent_row = cursor.fetchone()
-                if not ent_row:
-                    cursor.execute('SELECT * FROM suppliers WHERE id = ?', (entity_id,))
-                    ent_row = cursor.fetchone()
-                if ent_row:
-                    entity = dict(ent_row)
-            cursor.execute('\n                SELECT ti.*, ti.product_name as name, p.product_ref, p.reference\n                FROM transaction_items ti\n                LEFT JOIN products p ON ti.product_id = p.id\n                WHERE ti.transaction_id = ?\n            ', (t_id,))
-            items_rows = cursor.fetchall()
-            items = [dict(r) for r in items_rows]
+            if ent_id:
+                table = 'suppliers' if cat == 'supplier' else 'clients'
+                cursor.execute(f'SELECT * FROM {table} WHERE id = ?', (ent_id,))
+                e_row = cursor.fetchone()
+                if e_row:
+                    entity = dict(e_row)
+            cursor.execute('SELECT ti.*, p.product_ref, p.reference FROM transaction_items ti \n                            LEFT JOIN products p ON ti.product_id = p.id WHERE ti.transaction_id = ?', (t_id,))
+            items = [dict(r) for r in cursor.fetchall()]
             return {'transaction': trans, 'entity': entity, 'items': items}
         finally:
             conn.close()
@@ -5490,16 +5458,19 @@ class StockApp(MDApp):
 
     def show_entity_selection_dialog(self, x, next_action=None):
         self.pending_entity_next_action = next_action
+        if self.current_mode in ['purchase', 'return_purchase', 'invoice_purchase', 'order_purchase', 'supplier_payment']:
+            e_type = 'supplier'
+            title_text = 'Choisir un Fournisseur'
+        else:
+            e_type = 'account'
+            title_text = 'Choisir un Client'
+        self.entities_source_type = e_type
         content = MDBoxLayout(orientation='vertical', size_hint_y=None, height=dp(600))
         self.entity_search = SmartTextField(hint_text='Rechercher...', icon_right='magnify')
         self.entity_search.bind(text=self.filter_entities_paginated)
         content.add_widget(self.entity_search)
         self.rv_entity = EntityRecycleView()
         content.add_widget(self.rv_entity)
-        sales_modes = ['sale', 'return_sale', 'client_payment', 'invoice_sale', 'proforma']
-        e_type = 'account' if self.current_mode in sales_modes else 'supplier'
-        self.entities_source_type = e_type
-        title_text = 'Choisir un Client' if e_type == 'account' else 'Choisir un Fournisseur'
         self.entity_dialog = MDDialog(title=title_text, type='custom', content_cls=content, size_hint=(0.9, 0.8))
         self.entity_dialog.open()
         self.active_entity_rv = self.rv_entity
