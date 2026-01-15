@@ -2734,9 +2734,11 @@ class StockApp(MDApp):
             return max(h_r, h_l, 30) + 8
         doc_type_raw = str(transaction_data.get('doc_type', transaction_data.get('transaction_type', ''))).strip().upper()
         ref_text = str(transaction_data.get('custom_label') or transaction_data.get('invoice_number') or '')
-        stock_factor = AppConstants.STOCK_MOVEMENTS.get(doc_type_raw, 0)
-        fin_factor = AppConstants.FINANCIAL_FACTORS.get(doc_type_raw, 0)
-        is_transfer = stock_factor == 0 and fin_factor == 0 and (doc_type_raw in ['TR', 'TRANSFER', 'TRANSFERT'])
+        saved_cat = transaction_data.get('entity_category')
+        if not saved_cat:
+            saved_cat = AppConstants.get_entity_type(doc_type_raw)
+        is_supplier = saved_cat == 'supplier'
+        is_transfer = doc_type_raw in ['TR', 'TRANSFER', 'TRANSFERT']
         if 'TR' in ref_text.upper() and (not is_transfer):
             is_transfer = True
         items = transaction_data.get('items', [])
@@ -2749,7 +2751,6 @@ class StockApp(MDApp):
                 is_simple = True
             if not items and abs(stored_total_amount) > 0:
                 is_simple = True
-        is_supplier = (stock_factor == 1 or 'SUPPLIER' in doc_type_raw or 'PURCHASE' in doc_type_raw or ('BA' in doc_type_raw)) and (not is_transfer)
         if 'REGLEMENT' in str(ref_text).upper():
             is_supplier = True
         if is_transfer:
@@ -2809,7 +2810,7 @@ class StockApp(MDApp):
             abs_amount = abs(stored_total_amount)
             y = draw_text_line(f'{abs_amount:,.2f} DA'.replace(',', ' ').replace('.', ','), y, font_large, 'center')
             note = str(transaction_data.get('note', '')).strip()
-            if note and note != doc_title and (note != 'None'):
+            if note and note != 'None' and (note.upper() != doc_title.upper()):
                 y += 20
                 y = draw_text_line(f'Note: {note}', y, font_reg, 'center')
             y += 20
@@ -7118,7 +7119,6 @@ class StockApp(MDApp):
             zip_filename = f'MagPro_Cloud_Full_{timestamp}.zip'
             zip_path = self.get_unified_path(zip_filename)
             target_dir = os.path.dirname(zip_path)
-
             if os.path.exists(target_dir):
                 try:
                     for f in os.listdir(target_dir):
@@ -7129,17 +7129,14 @@ class StockApp(MDApp):
                                 pass
                 except:
                     pass
-
             temp_db_path = os.path.join(self.user_data_dir, 'temp_share_source.db')
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
-
             if self.db and self.db.conn:
                 self.db.conn.execute(f"VACUUM INTO '{temp_db_path}'")
             else:
                 self.db.connect()
                 self.db.conn.execute(f"VACUUM INTO '{temp_db_path}'")
-
             import zipfile
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 zipf.write(temp_db_path, arcname='magpro_local.db')
@@ -7150,10 +7147,8 @@ class StockApp(MDApp):
                             full_path = os.path.join(root, file)
                             arcname = os.path.join('product_images', file)
                             zipf.write(full_path, arcname=arcname)
-
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
-
             if platform == 'android':
                 from jnius import autoclass, cast
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
@@ -7164,20 +7159,17 @@ class StockApp(MDApp):
                 StrictMode = autoclass('android.os.StrictMode')
                 Builder = autoclass('android.os.StrictMode$VmPolicy$Builder')
                 StrictMode.setVmPolicy(Builder().build())
-
                 zip_file_obj = File(zip_path)
                 uri = Uri.fromFile(zip_file_obj)
                 parcelable_uri = cast('android.os.Parcelable', uri)
-                
                 shareIntent = Intent(Intent.ACTION_SEND)
                 shareIntent.setType('application/zip')
                 shareIntent.putExtra(Intent.EXTRA_STREAM, parcelable_uri)
                 shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-
                 currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
                 chooser_title = String(f'Sauvegarder fichier: {zip_filename}')
                 currentActivity.startActivity(Intent.createChooser(shareIntent, chooser_title))
-                
+
                 def delete_later(dt):
                     try:
                         if os.path.exists(zip_path):
