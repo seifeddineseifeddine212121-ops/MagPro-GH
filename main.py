@@ -7117,14 +7117,29 @@ class StockApp(MDApp):
             timestamp = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
             zip_filename = f'MagPro_Cloud_Full_{timestamp}.zip'
             zip_path = self.get_unified_path(zip_filename)
+            target_dir = os.path.dirname(zip_path)
+
+            if os.path.exists(target_dir):
+                try:
+                    for f in os.listdir(target_dir):
+                        if f.startswith('MagPro_Cloud_Full_') and f.endswith('.zip'):
+                            try:
+                                os.remove(os.path.join(target_dir, f))
+                            except:
+                                pass
+                except:
+                    pass
+
             temp_db_path = os.path.join(self.user_data_dir, 'temp_share_source.db')
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
+
             if self.db and self.db.conn:
                 self.db.conn.execute(f"VACUUM INTO '{temp_db_path}'")
             else:
                 self.db.connect()
                 self.db.conn.execute(f"VACUUM INTO '{temp_db_path}'")
+
             import zipfile
             with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                 zipf.write(temp_db_path, arcname='magpro_local.db')
@@ -7135,8 +7150,10 @@ class StockApp(MDApp):
                             full_path = os.path.join(root, file)
                             arcname = os.path.join('product_images', file)
                             zipf.write(full_path, arcname=arcname)
+
             if os.path.exists(temp_db_path):
                 os.remove(temp_db_path)
+
             if platform == 'android':
                 from jnius import autoclass, cast
                 PythonActivity = autoclass('org.kivy.android.PythonActivity')
@@ -7147,17 +7164,20 @@ class StockApp(MDApp):
                 StrictMode = autoclass('android.os.StrictMode')
                 Builder = autoclass('android.os.StrictMode$VmPolicy$Builder')
                 StrictMode.setVmPolicy(Builder().build())
+
                 zip_file_obj = File(zip_path)
                 uri = Uri.fromFile(zip_file_obj)
                 parcelable_uri = cast('android.os.Parcelable', uri)
+                
                 shareIntent = Intent(Intent.ACTION_SEND)
                 shareIntent.setType('application/zip')
                 shareIntent.putExtra(Intent.EXTRA_STREAM, parcelable_uri)
                 shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+
                 currentActivity = cast('android.app.Activity', PythonActivity.mActivity)
                 chooser_title = String(f'Sauvegarder fichier: {zip_filename}')
                 currentActivity.startActivity(Intent.createChooser(shareIntent, chooser_title))
-
+                
                 def delete_later(dt):
                     try:
                         if os.path.exists(zip_path):
