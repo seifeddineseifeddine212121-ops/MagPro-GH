@@ -143,7 +143,7 @@ class AppConstants:
     @staticmethod
     def get_entity_type(mode):
         supplier_modes = ['purchase', 'invoice_purchase', 'order_purchase', 'return_purchase', 'ba', 'ff', 'dp', 'rf', 'bi', 'supplier_payment', 'reglement']
-        if mode.lower() in supplier_modes:
+        if str(mode).lower() in supplier_modes:
             return 'supplier'
         return 'account'
 
@@ -529,7 +529,6 @@ class DatabaseManager:
         self.conn = None
         self.force_clean_startup()
         self.create_tables()
-        self._migrate_db_for_gps()
         self.seed_data()
 
     def force_clean_startup(self):
@@ -688,8 +687,8 @@ class DatabaseManager:
             cursor.execute('\n                CREATE TABLE IF NOT EXISTS product_families (\n                    id INTEGER PRIMARY KEY AUTOINCREMENT,\n                    name TEXT UNIQUE\n                )\n            ')
             cursor.execute("INSERT OR IGNORE INTO product_families (name) VALUES ('TOUS')")
             cursor.execute('\n                CREATE TABLE IF NOT EXISTS products (\n                    id INTEGER PRIMARY KEY AUTOINCREMENT,\n                    name TEXT,\n                    barcode TEXT,\n                    price REAL,\n                    stock REAL,\n                    category TEXT,\n                    family TEXT DEFAULT "TOUS",\n                    product_ref TEXT,\n                    image_path TEXT,\n                    reference TEXT,\n                    purchase_price REAL DEFAULT 0,\n                    price_semi REAL DEFAULT 0,\n                    price_wholesale REAL DEFAULT 0,\n                    is_used INTEGER DEFAULT 0,\n                    stock_warehouse REAL DEFAULT 0,\n                    is_promo_active INTEGER DEFAULT 0,\n                    promo_type TEXT DEFAULT "fixed",\n                    promo_value REAL DEFAULT 0,\n                    promo_qty_limit REAL DEFAULT 0,\n                    promo_expiry TEXT DEFAULT ""\n                )\n            ')
-            cursor.execute('\n                CREATE TABLE IF NOT EXISTS suppliers (\n                    id INTEGER PRIMARY KEY AUTOINCREMENT,\n                    name TEXT,\n                    phone TEXT,\n                    balance REAL DEFAULT 0,\n                    address TEXT,\n                    email TEXT,\n                    activity TEXT,\n                    rc TEXT,\n                    nif TEXT,\n                    nis TEXT,\n                    nai TEXT,\n                    price_category TEXT\n                )\n            ')
-            cursor.execute('\n                CREATE TABLE IF NOT EXISTS clients (\n                    id INTEGER PRIMARY KEY AUTOINCREMENT,\n                    name TEXT,\n                    phone TEXT,\n                    balance REAL DEFAULT 0,\n                    address TEXT,\n                    email TEXT,\n                    activity TEXT,\n                    rc TEXT,\n                    nif TEXT,\n                    nis TEXT,\n                    nai TEXT,\n                    price_category TEXT\n                )\n            ')
+            cursor.execute('\n                CREATE TABLE IF NOT EXISTS suppliers (\n                    id INTEGER PRIMARY KEY AUTOINCREMENT,\n                    name TEXT,\n                    phone TEXT,\n                    balance REAL DEFAULT 0,\n                    address TEXT,\n                    email TEXT,\n                    activity TEXT,\n                    rc TEXT,\n                    nif TEXT,\n                    nis TEXT,\n                    nai TEXT,\n                    price_category TEXT,\n                    gps_location TEXT DEFAULT ""\n                )\n            ')
+            cursor.execute('\n                CREATE TABLE IF NOT EXISTS clients (\n                    id INTEGER PRIMARY KEY AUTOINCREMENT,\n                    name TEXT,\n                    phone TEXT,\n                    balance REAL DEFAULT 0,\n                    address TEXT,\n                    email TEXT,\n                    activity TEXT,\n                    rc TEXT,\n                    nif TEXT,\n                    nis TEXT,\n                    nai TEXT,\n                    price_category TEXT,\n                    gps_location TEXT DEFAULT ""\n                )\n            ')
             cursor.execute("\n                CREATE TABLE IF NOT EXISTS transactions (\n                    id INTEGER PRIMARY KEY AUTOINCREMENT,\n                    transaction_type TEXT,\n                    entity_category TEXT, \n                    client_name TEXT,\n                    total_amount REAL,\n                    discount REAL DEFAULT 0,\n                    date TIMESTAMP,\n                    entity_id INTEGER,\n                    custom_label TEXT,\n                    user_name TEXT,\n                    note TEXT,\n                    payment_details TEXT,\n                    location TEXT DEFAULT 'store' \n                )\n            ")
             cursor.execute('\n                CREATE TABLE IF NOT EXISTS transaction_items (\n                    id INTEGER PRIMARY KEY AUTOINCREMENT,\n                    transaction_id INTEGER,\n                    product_id INTEGER,\n                    product_name TEXT,\n                    qty REAL,\n                    price REAL,\n                    cost_price REAL DEFAULT 0,\n                    tva REAL DEFAULT 0,\n                    is_return INTEGER DEFAULT 0,\n                    FOREIGN KEY(transaction_id) REFERENCES transactions(id)\n                )\n            ')
             cursor.execute('\n                CREATE TABLE IF NOT EXISTS app_settings (\n                    key TEXT PRIMARY KEY,\n                    value TEXT\n                )\n            ')
@@ -699,13 +698,13 @@ class DatabaseManager:
         finally:
             conn.close()
 
-    def get_active_entity_ids_today(self, entity_category='client'):
+    def get_active_entity_ids_today(self, entity_category='account'):
         conn = self.get_connection()
         try:
             cursor = conn.cursor()
             today_str = datetime.now().strftime('%Y-%m-%d')
-            query = "\n                SELECT DISTINCT entity_id \n                FROM transactions \n                WHERE date(date) = date(?) \n                AND entity_category = ?\n                AND transaction_type NOT IN ('CLIENT_PAY', 'SUPPLIER_PAY', 'VERSEMENT', 'REGLEMENT')\n            "
             cat_val = 'client' if entity_category == 'account' else 'supplier'
+            query = "\n                SELECT DISTINCT entity_id \n                FROM transactions \n                WHERE date(date) = date(?) \n                AND entity_category = ?\n                AND transaction_type NOT IN ('CLIENT_PAY', 'SUPPLIER_PAY', 'VERSEMENT', 'REGLEMENT')\n            "
             cursor.execute(query, (today_str, cat_val))
             rows = cursor.fetchall()
             return [row[0] for row in rows if row[0] is not None]
@@ -1170,6 +1169,8 @@ class DatabaseManager:
                     bal_revert = original_impact * -1
                     if bal_revert != 0:
                         old_cat = old_trans.get('entity_category', 'client')
+                        if not old_cat:
+                            old_cat = AppConstants.get_entity_type(old_type)
                         target_tbl_old = 'suppliers' if old_cat == 'supplier' else 'clients'
                         cursor.execute(f'UPDATE {target_tbl_old} SET balance = ROUND(balance + ?, 2) WHERE id = ?', (bal_revert, old_ent_id))
                 cursor.execute('DELETE FROM transaction_items WHERE transaction_id=?', (t_id,))
@@ -1229,9 +1230,11 @@ class DatabaseManager:
                 return
             trans = dict(trans)
             t_type = trans['transaction_type']
-            cat = trans['entity_category']
             ent_id = trans['entity_id']
             total = float(trans['total_amount'])
+            cat = trans.get('entity_category')
+            if not cat:
+                cat = AppConstants.get_entity_type(t_type)
             cursor.execute('SELECT product_id, qty FROM transaction_items WHERE transaction_id=?', (t_id,))
             s_factor = AppConstants.STOCK_MOVEMENTS.get(t_type, 0)
             loc = trans.get('location', 'store')
@@ -1268,8 +1271,12 @@ class DatabaseManager:
                 query += ' AND entity_id = ?'
                 params.append(entity_id)
             if entity_category:
+                if entity_category == 'supplier':
+                    db_cat = 'supplier'
+                else:
+                    db_cat = 'client'
                 query += ' AND entity_category = ?'
-                params.append(entity_category)
+                params.append(db_cat)
             query += ' ORDER BY id DESC LIMIT ? OFFSET ?'
             params.append(limit)
             params.append(offset)
@@ -1294,7 +1301,10 @@ class DatabaseManager:
                 return None
             trans = dict(t_row)
             ent_id = trans.get('entity_id')
-            cat = trans.get('entity_category', 'client')
+            cat = trans.get('entity_category')
+            if not cat:
+                t_type = trans.get('transaction_type', '')
+                cat = AppConstants.get_entity_type(t_type)
             entity = {}
             if ent_id:
                 table = 'suppliers' if cat == 'supplier' else 'clients'
@@ -2418,7 +2428,7 @@ class StockApp(MDApp):
             for p in products_list:
                 try:
                     s_store = float(p.get('stock', 0) or 0)
-                    is_unlimited = s_store <= -900000
+                    is_unlimited = s_store <= -900000 or p.get('id') == -999
                     if p.get('id') == -999 and is_transfer:
                         continue
                     if is_transfer and is_unlimited:
@@ -2428,6 +2438,8 @@ class StockApp(MDApp):
                     price_fmt = ''
                     price_color = [0, 0, 0, 1]
                     stock_text = ''
+                    icon = 'package-variant'
+                    icon_col = [0, 0.6, 0, 1]
                     if is_transfer:
                         price_fmt = f'Tot: {fmt_qty(total_stock)}'
                         price_color = [0.2, 0.2, 0.8, 1]
@@ -2436,6 +2448,16 @@ class StockApp(MDApp):
                         price = float(p.get('purchase_price', p.get('price', 0)) or 0)
                         price_fmt = f'{price:.2f} DA'
                         price_color = [0.9, 0.5, 0, 1]
+                        if p.get('id') == -999:
+                            price_fmt = 'Prix Libre'
+                            price_color = [0, 0.4, 0.8, 1]
+                            icon = 'pencil-plus'
+                            icon_col = [0, 0.4, 0.8, 1]
+                            stock_text = 'Illimité'
+                        elif is_unlimited:
+                            stock_text = 'Illimité'
+                        else:
+                            stock_text = f'Qté: {fmt_qty(s_store)}'
                     else:
                         base_price = float(p.get('price', 0) or 0)
                         final_display_price = base_price
@@ -4326,7 +4348,13 @@ class StockApp(MDApp):
                         price = float(p.get('purchase_price', p.get('price', 0)) or 0)
                         price_fmt = f'{price:.2f} DA'
                         price_color = [0.9, 0.5, 0, 1]
-                        if is_unlimited:
+                        if p.get('id') == -999:
+                            price_fmt = 'Prix Libre'
+                            price_color = [0, 0.4, 0.8, 1]
+                            icon = 'pencil-plus'
+                            icon_col = [0, 0.4, 0.8, 1]
+                            stock_text = 'Illimité'
+                        elif is_unlimited:
                             stock_text = 'Illimité'
                         else:
                             stock_text = f'Qté: {fmt_qty(s_store)}'
@@ -5936,7 +5964,10 @@ class StockApp(MDApp):
                 ent_name = item.get('client_name')
                 if not ent_name and item.get('entity_id'):
                     cid = item.get('entity_id')
-                    is_supp = 'SUPPLIER' in t_type or AppConstants.STOCK_MOVEMENTS.get(t_type) == 1
+                    cat = item.get('entity_category')
+                    if not cat:
+                        cat = AppConstants.get_entity_type(t_type)
+                    is_supp = cat == 'supplier'
                     found = self.db.get_entity_by_id(cid, 'supplier' if is_supp else 'account')
                     if found:
                         ent_name = found.get('name')
@@ -5984,19 +6015,21 @@ class StockApp(MDApp):
             pdf = PDF(orientation='P', unit='mm', format='A4')
             pdf.store_info = store_info
             doc_type_raw = str(doc_type).upper().strip()
-            stock_factor = AppConstants.STOCK_MOVEMENTS.get(doc_type_raw, 0)
-            fin_factor = AppConstants.FINANCIAL_FACTORS.get(doc_type_raw, 0)
-            is_transfer = stock_factor == 0 and fin_factor == 0 and (doc_type_raw in ['TR', 'TRANSFER', 'TRANSFERT'])
-            is_supplier = (stock_factor == 1 or 'SUPPLIER' in doc_type_raw or 'PURCHASE' in doc_type_raw or ('BA' in doc_type_raw)) and (not is_transfer)
+            saved_category = trans.get('entity_category')
+            if not saved_category:
+                saved_category = AppConstants.get_entity_type(doc_type_raw)
+            is_supplier = saved_category == 'supplier'
+            is_transfer = doc_type_raw in ['TR', 'TRANSFER', 'TRANSFERT']
             final_entity_data = initial_entity
             display_name = ''
             ent_id = trans.get('entity_id')
             if ent_id:
                 found = None
-                if is_supplier:
-                    found = self.db.get_entity_by_id(ent_id, 'supplier')
+                target_type = 'supplier' if is_supplier else 'account'
+                if not initial_entity:
+                    found = self.db.get_entity_by_id(ent_id, target_type)
                 else:
-                    found = self.db.get_entity_by_id(ent_id, 'account')
+                    found = initial_entity
                 if found:
                     final_entity_data = found
                     display_name = found.get('name', '')
@@ -6104,6 +6137,7 @@ class StockApp(MDApp):
                 show_balance_setting = self.db.get_setting('show_balance_in_pdf', 'False') == 'True'
                 is_target_doc = doc_type_raw in ['BV', 'BA', 'SALE', 'PURCHASE']
                 not_default = display_name != AppConstants.DEFAULT_CLIENT_NAME and display_name != AppConstants.DEFAULT_SUPPLIER_NAME
+                fin_factor = AppConstants.FINANCIAL_FACTORS.get(doc_type_raw, 0)
                 if show_balance_setting and is_target_doc and ent_id and not_default and (fin_factor != 0):
                     try:
                         conn = self.db.get_connection()
@@ -6273,7 +6307,8 @@ class StockApp(MDApp):
             target_mode = 'supplier_payment' if 'SUPPLIER' in doc_type else 'client_payment'
             ent_id = header_data.get('entity_id')
             if ent_id:
-                f = self.db.get_entity_by_id(ent_id, 'supplier' if 'SUPPLIER' in doc_type else 'account')
+                is_supp = 'SUPPLIER' in doc_type
+                f = self.db.get_entity_by_id(ent_id, 'supplier' if is_supp else 'account')
                 self.selected_entity = f
             lbl = header_data.get('custom_label', '')
             self.temp_note = header_data.get('note', '') if header_data.get('note') != lbl else ''
@@ -6284,7 +6319,10 @@ class StockApp(MDApp):
         self.selected_location = header_data.get('location') or header_data.get('purchase_location') or 'store'
         ent_id = header_data.get('entity_id')
         found_entity = None
-        is_supp_mode = AppConstants.get_entity_type(target_mode) == 'supplier'
+        saved_cat = header_data.get('entity_category')
+        if not saved_cat:
+            saved_cat = AppConstants.get_entity_type(doc_type)
+        is_supp_mode = saved_cat == 'supplier'
         if ent_id:
             found_entity = self.db.get_entity_by_id(ent_id, 'supplier' if is_supp_mode else 'account')
         if found_entity is None:
@@ -6323,11 +6361,16 @@ class StockApp(MDApp):
                 try:
                     conn = self.db.get_connection()
                     cursor = conn.cursor()
-                    cursor.execute('SELECT transaction_type FROM transactions WHERE id=?', (trans_id,))
+                    cursor.execute('SELECT transaction_type, entity_category FROM transactions WHERE id=?', (trans_id,))
                     row = cursor.fetchone()
                     if row:
-                        t_type = row[0]
-                        if AppConstants.STOCK_MOVEMENTS.get(t_type) == 1 or 'SUPPLIER' in t_type:
+                        t_type = row['transaction_type']
+                        e_cat = row['entity_category']
+                        if e_cat == 'supplier':
+                            trans_type_to_update = 'supplier'
+                        elif e_cat == 'client':
+                            trans_type_to_update = 'account'
+                        elif AppConstants.get_entity_type(t_type) == 'supplier':
                             trans_type_to_update = 'supplier'
                     conn.close()
                 except:
@@ -6371,12 +6414,15 @@ class StockApp(MDApp):
         finally:
             conn.close()
         doc_type = header_data.get('transaction_type', 'BV').upper()
-        stock_f = AppConstants.STOCK_MOVEMENTS.get(doc_type, 0)
-        is_supplier = stock_f == 1 or 'SUPPLIER' in doc_type or 'PURCHASE' in doc_type
+        saved_category = header_data.get('entity_category')
+        if not saved_category:
+            saved_category = AppConstants.get_entity_type(doc_type)
+        is_supplier = saved_category == 'supplier'
         is_transfer = doc_type in ['TR', 'TRANSFER']
         ent_id = header_data.get('entity_id')
         raw_entity_name = header_data.get('client_name', '')
         if ent_id:
+            target_table = 'suppliers' if is_supplier else 'clients'
             found = self.db.get_entity_by_id(ent_id, 'supplier' if is_supplier else 'account')
             if found:
                 raw_entity_name = found.get('name')
